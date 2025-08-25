@@ -14,3 +14,6 @@ A repository for code relating to PACE rapid response effort. Events covered in 
 | Hypoxia-level Blooms |    |  TBD  |
 | Antarctic Ice Shelf Collapse/Icebergs |  | TBD | 
 | Air Quality |    |  TBD  |
+| Oceanographic Features |    |  TBD  |
+| Phytoplankon Blooms |    |  TBD  |
+| Sediment Plumes |    |  TBD  |
