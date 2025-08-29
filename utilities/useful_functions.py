@@ -130,20 +130,21 @@ def reproject_3d(src, crs="epsg:4326"):
     ).rename({"x":"longitude", "y":"latitude"})
     return dst
 
-def grid_match_3d(src, crs="epsg:4326", dst_shape=None, transform=None):
+def grid_match_3d(src, crs, dst_shape=None, transform=None):
     """
-    Note take from grahams code 
+    Reproject an L2 to match an input shape and grid 
     Args:
-        src - either an xr object or a list of earthaccess paths
+        src - an xarray dataset or a path to a file
         crs - coordinate reference system for projection. Currently will project into
               the same as written in
+        dst_shape - shape of the dataset to match
         transform - Affine transform to project into. supply this argument if projecting
               onto the same grid as a previous dataset
     Returns:
         dst - projected xr dataset
     """
     # Open file if given a path
-    if type(src) == str:
+    if type(src)!= xr.Dataset and type(src)!= xr.DataArray:
         src = open_nc(src)
     # Make sure bands are first, as rio expects
     if src.dims[0] != "wavelength_3d":
@@ -152,7 +153,9 @@ def grid_match_3d(src, crs="epsg:4326", dst_shape=None, transform=None):
     src = src.rio.write_crs(crs)
 
     dst = src.rio.reproject(
-        dst_crs = src.rio.crs, 
+        dst_crs = src.rio.crs,
+        shape=dst_shape,
+        transform=transform,
         src_geoloc_array=(
             src.coords["longitude"],
             src.coords["latitude"],
