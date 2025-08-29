@@ -4,6 +4,10 @@
 import xarray as xr 
 import numpy as np 
 import cf_xarray
+import rasterio 
+import rioxarray as rio
+import cartopy.crs as ccrs
+from rasterio.enums import Resampling
 
 def open_nc(filename, filetype="L2"):
     """ 
@@ -72,6 +76,7 @@ def subset(ds, extent):
 def mask_ds(ds, flag="CLDICE", mask_reverse=False):
     """
     Mask for a PACE dataset for an L2 flag using cf_xarray. Default is clouds
+    To do: add utility to mask multiple flags at once
     Args:
         ds - xarray dataset containing "l2_flags" variable
         flag - l2 flag to mask for (see https://oceancolor.gsfc.nasa.gov/resources/atbd/ocl2flags/)
@@ -89,3 +94,72 @@ def mask_ds(ds, flag="CLDICE", mask_reverse=False):
             return ds.where((ds["l2_flags"].cf == flag))
     else:
         print("l2flags not recognized as flag variable")
+
+def reproject_3d(src, crs="epsg:4326"):
+    """
+    Project a L2 3d variable with a given CRS. Will take either a single xr object or 
+        a filepath from earthaccess.
+    Note: Only tested for SFREFL, but should work for Rrs as long as src = only the Rrs
+        dataset
+    Args:
+        src - either an xr object or a list of earthaccess paths
+        crs - coordinate reference system for projection. Currently will project into
+              the same as written in
+        transform - Affine transform to project into. supply this argument if projecting
+              onto the same grid as a previous dataset
+    Returns:
+        dst - projected xr dataset
+    """
+    # Open file if given a path
+    if type(src) == str:
+        src = open_nc(src)
+    # Make sure bands are first, as rio expects
+    if src.dims[0] != "wavelength_3d":
+        src = src.transpose("wavelength_3d", ...)
+    src = src.rio.set_spatial_dims("pixels_per_line", "number_of_lines")
+    src = src.rio.write_crs(crs)
+
+    dst = src.rio.reproject(
+        dst_crs = src.rio.crs, 
+        src_geoloc_array=(
+            src.coords["longitude"],
+            src.coords["latitude"],
+        ),
+        nodata=np.nan,
+        resample=Resampling.nearest,
+    ).rename({"x":"longitude", "y":"latitude"})
+    return dst
+
+def grid_match_3d(src, crs="epsg:4326", dst_shape=None, transform=None):
+    """
+    Note take from grahams code 
+    Args:
+        src - either an xr object or a list of earthaccess paths
+        crs - coordinate reference system for projection. Currently will project into
+              the same as written in
+        transform - Affine transform to project into. supply this argument if projecting
+              onto the same grid as a previous dataset
+    Returns:
+        dst - projected xr dataset
+    """
+    # Open file if given a path
+    if type(src) == str:
+        src = open_nc(src)
+    # Make sure bands are first, as rio expects
+    if src.dims[0] != "wavelength_3d":
+        src = src.transpose("wavelength_3d", ...)
+    src = src.rio.set_spatial_dims("pixels_per_line", "number_of_lines")
+    src = src.rio.write_crs(crs)
+
+    dst = src.rio.reproject(
+        dst_crs = src.rio.crs, 
+        src_geoloc_array=(
+            src.coords["longitude"],
+            src.coords["latitude"],
+        ),
+        nodata=np.nan,
+        resample=Resampling.nearest,
+    ).rename({"x":"longitude", "y":"latitude"})
+    return dst
+        
+    
