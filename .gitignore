@@ -7,6 +7,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+#Netcdf Extensions #This is a test by Matthew Kehrli
+*.nc
+
 # C extensions
 *.so
 
