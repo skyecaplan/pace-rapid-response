@@ -111,7 +111,7 @@ def reproject_3d(src, crs="epsg:4326"):
         dst - projected xr dataset
     """
     # Open file if given a path
-    if type(src) == str:
+    if type(src)!= xr.Dataset and type(src)!= xr.DataArray:
         src = open_nc(src)
     # Make sure bands are first, as rio expects
     if src.dims[0] != "wavelength_3d":
