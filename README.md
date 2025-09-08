@@ -2,6 +2,8 @@
 
 A repository for code relating to PACE rapid response effort. Events covered in this repo are listed in the table below, and the notebook(s) used to cover them will be added once they exist. Instructions for running the code will be written once we have some notebooks!
 
+Preliminary workflow for Hurricane Erin showed off by Graham and Matt located at PRR_OC/PRR_OC_workflow.ipynb
+
 | Event | Notebook | POC? |
 |------|--------|--------|
 | Volcanic Eruptions |    |  TBD  |
