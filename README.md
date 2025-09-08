@@ -7,7 +7,7 @@ A repository for code relating to PACE rapid response effort. Events covered in 
 | Volcanic Eruptions |    |  TBD  |
 | Dust Storms |  | TBD | 
 | Biomass Burnings regional impact |    |  TBD  |
-| Biomass Burning smoke transport |   | TBD  |
+| Biomass Burning smoke transport | smoke | TBD  |
 | Major Precipitaiton/Storms |  | TBD | 
 | HABs |    |  TBD  |
 | Drought |  | TBD | 
