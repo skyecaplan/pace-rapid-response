@@ -181,3 +181,5 @@ PRR_OC/local_data
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+# Mac OSX
+.DS_Store 
