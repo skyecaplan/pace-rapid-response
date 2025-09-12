@@ -8,6 +8,7 @@ import rasterio
 import rioxarray as rio
 import cartopy.crs as ccrs
 from rasterio.enums import Resampling
+from PIL import Image, ImageEnhance
 
 def open_nc(filename, filetype="L2"):
     """ 
@@ -22,7 +23,7 @@ def open_nc(filename, filetype="L2"):
         ds - xarray dataset with lat/lon as coords 
     """
     # Open file as datatree
-    dt = xr.open_datatree(filename)
+    dt = xr.open_datatree(filename, decode_timedelta=False)
     if filetype =="L1B":
         ds = dt["observation_data"].to_dataset()
         ds.coords["longitude"] = dt["geolocation_data"]["longitude"]
@@ -105,8 +106,6 @@ def reproject_3d(src, crs="epsg:4326"):
         src - either an xr object or a list of earthaccess paths
         crs - coordinate reference system for projection. Currently will project into
               the same as written in
-        transform - Affine transform to project into. supply this argument if projecting
-              onto the same grid as a previous dataset
     Returns:
         dst - projected xr dataset
     """
@@ -114,7 +113,7 @@ def reproject_3d(src, crs="epsg:4326"):
     if type(src)!= xr.Dataset and type(src)!= xr.DataArray:
         src = open_nc(src)
     # Make sure bands are first, as rio expects
-    if src.dims[0] != "wavelength_3d":
+    if list(src.dims)[0] != "wavelength_3d":
         src = src.transpose("wavelength_3d", ...)
     src = src.rio.set_spatial_dims("pixels_per_line", "number_of_lines")
     src = src.rio.write_crs(crs)
@@ -138,8 +137,7 @@ def grid_match_3d(src, crs, dst_shape=None, transform=None):
         crs - coordinate reference system for projection. Currently will project into
               the same as written in
         dst_shape - shape of the dataset to match
-        transform - Affine transform to project into. supply this argument if projecting
-              onto the same grid as a previous dataset
+        transform - Affine transform to project into
     Returns:
         dst - projected xr dataset
     """
@@ -147,13 +145,13 @@ def grid_match_3d(src, crs, dst_shape=None, transform=None):
     if type(src)!= xr.Dataset and type(src)!= xr.DataArray:
         src = open_nc(src)
     # Make sure bands are first, as rio expects
-    if src.dims[0] != "wavelength_3d":
+    if list(src.dims)[0] != "wavelength_3d":
         src = src.transpose("wavelength_3d", ...)
     src = src.rio.set_spatial_dims("pixels_per_line", "number_of_lines")
     src = src.rio.write_crs(crs)
 
     dst = src.rio.reproject(
-        dst_crs = src.rio.crs,
+        dst_crs=src.rio.crs,
         shape=dst_shape,
         transform=transform,
         src_geoloc_array=(
@@ -164,5 +162,62 @@ def grid_match_3d(src, crs, dst_shape=None, transform=None):
         resample=Resampling.nearest,
     ).rename({"x":"longitude", "y":"latitude"})
     return dst
-        
+
+def make_rgb(ds, scale=0.01, vmin=0, vmax=1.1, gamma=1, contrast=1.1, brightness=1, sharpness=1.1, saturation=1):
+    """
+    To Do: expand docstring
+    Carina's code for making very nice RGB images out of reflectance data
+    Args: 
+        ds - l2 sfrefl data
+        all others - img enhancer params
+    Returns:
+        rgb_ds - ds of enhanced rgb for plotting
+    """
+    rgb = ds["rhos"].sel({"wavelength_3d": [645, 555, 368]}, method="nearest")
+    # Apply your processing steps
+    rgb = rgb.where(rgb > 0)
+    rgb = np.log(rgb / scale) / np.log(1 / scale)
+    rgb = rgb.where(rgb >= vmin, vmin)
+    rgb = rgb.where(rgb <= vmax, vmax)    
+    rgb = (rgb - rgb.min()) / (rgb.max() - rgb.min())
+    rgb = rgb * gamma
+    
+    # Convert to 8-bit image format
+    img = rgb * 255
+    img = img.where(img.notnull(), 0).astype("uint8")
+    
+    # COMPUTE the dask array to numpy before using PIL
+    img_numpy = img.compute().values  # This converts dask array to numpy array
+    
+    # Check the shape and adjust if necessary for PIL
+    #print(f"Image shape: {img_numpy.shape}")
+    
+    # PIL expects the wavelength dimension to be last, so we might need to transpose
+    # If shape is (wavelength, y, x), transpose to (y, x, wavelength)
+    if img_numpy.shape[0] == 3:  # wavelength dimension is first
+        img_numpy = np.transpose(img_numpy, (1, 2, 0))
+    
+    # Now PIL can work with the numpy array
+    img_pil = Image.fromarray(img_numpy)
+    
+    # Apply enhancements
+    enhancer = ImageEnhance.Contrast(img_pil)
+    img_pil = enhancer.enhance(contrast)
+    
+    enhancer = ImageEnhance.Brightness(img_pil)
+    img_pil = enhancer.enhance(brightness)
+    
+    enhancer = ImageEnhance.Sharpness(img_pil)
+    img_pil = enhancer.enhance(sharpness)
+    
+    enhancer = ImageEnhance.Color(img_pil)
+    img_pil = enhancer.enhance(saturation)
+    
+    # Convert back to numpy array and normalize to 0-1 range
+    rgb_enhanced = np.array(img_pil) / 255
+    rgb_ds = xr.Dataset(data_vars={"rgb":(["number_of_lines","pixels_per_line", "wavelength_3d"], rgb_enhanced)},
+                    coords={"latitude":ds.latitude, 
+                            "longitude":ds.longitude, 
+                            "wavelength_3d":[645, 555, 368]})
+    return rgb_ds
     
