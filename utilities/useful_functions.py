@@ -12,11 +12,12 @@ from PIL import Image, ImageEnhance
 
 def open_nc(filename, filetype="L2"):
     """ 
-    Opens a L1B- or L2-like PACE file and assign lat/lon as coordinates. 
+    Opens a L1B- or L2-like PACE OCI file and assign lat/lon as coordinates. 
     Returns the entire observation_ or geophysical_data groups in the 
         output dataset
+    TO DO: Update for HARP and Spex?
     Args:
-        filename - Path to input PACE file
+        filename - Path to input PACE OCI file
         filetype - str to tell which file type to open. Default = L2
                    Options: L1B or L2
     Returns:
@@ -103,7 +104,7 @@ def reproject_3d(src, crs="epsg:4326"):
     Note: Only tested for SFREFL, but should work for Rrs as long as src = only the Rrs
         dataset
     Args:
-        src - either an xr object or a list of earthaccess paths
+        src - an xr dataset or dataarray
         crs - coordinate reference system for projection. Currently will project into
               the same as written in
     Returns:
@@ -165,13 +166,12 @@ def grid_match_3d(src, crs, dst_shape=None, transform=None):
 
 def make_rgb(ds, scale=0.01, vmin=0, vmax=1.1, gamma=1, contrast=1.1, brightness=1, sharpness=1.1, saturation=1):
     """
-    To Do: expand docstring
-    Carina's code for making very nice RGB images out of reflectance data
+    Carina's code for making very nice RGB images out of reflectance data (see swath_reprojected.ipynb)
     Args: 
-        ds - l2 sfrefl data
-        all others - img enhancer params
+        ds - L2 sfrefl dataset (with wavelength_3d and lat/lons as coords)
+        all others - parameters for image enhancement
     Returns:
-        rgb_ds - ds of enhanced rgb for plotting
+        rgb_ds - ds of enhanced rgb
     """
     rgb = ds["rhos"].sel({"wavelength_3d": [645, 555, 368]}, method="nearest")
     # Apply your processing steps
@@ -215,6 +215,8 @@ def make_rgb(ds, scale=0.01, vmin=0, vmax=1.1, gamma=1, contrast=1.1, brightness
     
     # Convert back to numpy array and normalize to 0-1 range
     rgb_enhanced = np.array(img_pil) / 255
+
+    # Throw into a dataset for plotting with ds.plot.imshow
     rgb_ds = xr.Dataset(data_vars={"rgb":(["number_of_lines","pixels_per_line", "wavelength_3d"], rgb_enhanced)},
                     coords={"latitude":ds.latitude, 
                             "longitude":ds.longitude, 
