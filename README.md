@@ -4,7 +4,7 @@ A repository for code relating to PACE rapid response effort. Events covered in 
 
 | Event | Notebook | POC | Reviewers |
 |------|--------|--------|-----|
-| Rapid Response |                         |  | |
+| **Rapid Response** ||||
 | Volcanic Eruptions |                     | knoebelsp | kiwiriver, Ivona, skyecaplan |
 | Dust Storms        |                     | kiwiriver | knoebelsp, skyecaplan |
 | Biomass Burnings regional impact |       | skyecaplan | kiwiriver |
@@ -16,7 +16,7 @@ A repository for code relating to PACE rapid response effort. Events covered in 
 | Hurricanes/Cyclones | PRR_OC/PRR_OC_workflow.ipynb | mdkehrli, grahamtrolley | Carlos, Chamara |
 | Antarctic Ice Shelf Collapse/Icebergs |  | cpoulinn? | | 
 | Sargassum |                              | Amir | Antonio|
-| Seasonality, trend, unexpected discoveries | |  | |
+| **Seasonality, trend, unexpected discoveries** ||||
 | Air Quality (Trace Gas) |                | Andy? | knoebelsp, Meng |
 | Obvious Human Activity Changes|          | Andy? | knoebelsp  |
 | Oceanographic Features |                 | mdkehrli | Antonio, Ivona|
