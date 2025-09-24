@@ -4,7 +4,7 @@ A repository for code relating to PACE rapid response effort. Events covered in 
 
 | Event | Notebook | POC | Reviewers |
 |------|--------|--------|-----|
-| **Rapid Response** ||||
+| **Rapid Response** ||||||||
 | Volcanic Eruptions |                     | knoebelsp | kiwiriver, Ivona, skyecaplan |
 | Dust Storms        |                     | kiwiriver | knoebelsp, skyecaplan |
 | Biomass Burnings regional impact |       | skyecaplan | kiwiriver |
