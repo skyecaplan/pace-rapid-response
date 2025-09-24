@@ -7,7 +7,7 @@ A repository for code relating to PACE rapid response effort. Events covered in 
 | **Rapid Response** ||
 | Volcanic Eruptions |                     | knoebelsp | kiwiriver, Ivona, skyecaplan |
 | Dust Storms        |                     | kiwiriver | knoebelsp, skyecaplan |
-| Biomass Burnings regional impact |       | skyecaplan | kiwiriver |
+| Biomass Burnings regional impact | land/dNBR_analysis.ipynb      | skyecaplan | kiwiriver |
 | Biomass Burning smoke transport | smoke/PACE_L3_smoke.ipynb  | knoebelsp, karyal1 | kiwiriver |
 | Major Precipitaiton/Storms/Flooding |             | skyecaplan, Chamara? | Ivona, mdkehrli, grahamtrolley |
 | HABs (Cyano/ILW) | inland-waters/cyano_index.ipynb  | skyecaplan, Bridget,  | Antonio, Ivona, Carlos |
