@@ -2,7 +2,7 @@
 
 A repository for code relating to PACE rapid response effort. Events covered in this repo along with the relevant notebooks are listed in the table below.
 
-| Event | Notebook | POC (git name) | Review (git name) |
+| Event | Notebook | POC | Reviewers |
 |------|--------|--------|-----|
 | Rapid Response |                         |  | |
 | Volcanic Eruptions |                     | knoebelsp | kiwiriver, Ivona, skyecaplan |
