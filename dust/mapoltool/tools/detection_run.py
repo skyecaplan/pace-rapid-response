@@ -58,8 +58,8 @@ parser.add_argument("--tspan_end", type=str, help="End date of the time span (YY
 args = parser.parse_args()
 
 # If no --tspan_start or --tspan_end provided, use the default values as two days ago
-default_start_time = "2025-09-17"
-default_end_time = "2025-09-17"
+default_start_time = "2025-09-14"
+default_end_time = "2025-09-14"
 
 tspan_start = args.tspan_start if args.tspan_start else default_start_time
 tspan_end = args.tspan_end if args.tspan_end else default_end_time
@@ -96,7 +96,8 @@ print("found:", short_name)
 nfile = len(filelist_l2)
 print("total file before selection", nfile)
 
-aod_min = 0.3
+aod_min_plot = 0.15 #for screen out pixel in plot
+aod_min = 0.3 #for aerosol event detection
 npixel_min = 100*100
 filev2 = select_data(filelist_l2, aod_min=aod_min, npixel_min=npixel_min)
 nfile = len(filev2)
@@ -104,7 +105,13 @@ print("total file after selection", nfile)
 
 
 ##make plots
-make_plot(filev2, plot_path, l1c_path, flag_cloud=flag_cloud)
+#boxv: timestamp3, boundingbox, center
+boxv = make_plot(filev2, plot_path, l1c_path, flag_cloud=flag_cloud, aod_min=aod_min_plot)
+
+title1 = day1
+fileout1= plot_path+'pace_harp2_'+day1+'_boxes.png'
+plot_bounding_boxes(boxv, title=title1, fileout=fileout1)
+
 
 output_file = html_path+"harp2_fastmapol_"+day1+'_n'+str(nfile)+".html"
 
@@ -116,13 +123,13 @@ titlev_custom = [["", "", "AOD (550nm)"], ["Single Scattering Albedo (550nm)",
 #    {} granule found for valid #pixel > {} (when aod(550nm) > {})'.format(nfile, npixel_min, aod_min)
 
 title = "PACE HARP2 FastMAPOL L2 Rapid Response:{}-{}".format(tspan[0], tspan[1])
-title2 = "Total {} granule found for valid #pixel > {} (when aod(550nm) > {})".format(nfile, npixel_min, aod_min)
+title2 = "Total {} granule found for valid #pixel > {} (when aod(550nm) > {}); Plot for aod(550nm)>{}".format(nfile, npixel_min, aod_min, aod_min_plot)
              
 print(title)
 print(title2)
 
 image_groups = get_images_from_subfolders(plot_path)
-create_html_from_subfolders(image_groups, output_file, sequence, title=title, title2=title2,
+create_html_from_subfolders(image_groups, output_file, sequence, global_map=fileout1, title=title, title2=title2,
                              titlev=titlev_custom, resolution_factor=2, quality=75)
 
 

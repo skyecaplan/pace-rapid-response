@@ -75,7 +75,7 @@ def get_images_from_subfolders(base_folder, valid_extensions=None):
     return grouped_images
 
 
-def create_html_from_subfolders(image_groups, output_html, sequence, \
+def create_html_from_subfolders(image_groups, output_html, sequence, global_map=None,\
                                 title="Combined Image Gallery", title2=None,\
                                  titlev=None, resolution_factor=1, quality=85):
     """
@@ -100,13 +100,39 @@ def create_html_from_subfolders(image_groups, output_html, sequence, \
         #f.write(f"<h1>{title2}</h1>\n")
         f.write(f"<p>{title2}</p>\n")
 
+        # CHANGE START: Add top navigation menu with links to timestamp anchors
+        f.write("<nav style='margin-bottom: 20px;'>\n")
+        f.write("<ul>\n")
+        for group in image_groups:
+            f.write(f"<li><a href='#{group['timestamp']}'>{group['timestamp']}</a></li>\n")
+        f.write("</ul>\n")
+        f.write("</nav>\n")
+        # CHANGE END
+
+        if(global_map):
+            write_single_image(global_map, f, resolution_factor=1, quality=85)
+        
         # Write each group of images
         for group in image_groups:
             timestamp = group["timestamp"]
             images = group["images"]
             print("create html", timestamp)
+
+            # Construct the download URL based on the timestamp
+            download_url = f"http://oceandata.sci.gsfc.nasa.gov/getfile/PACE_HARP2.{timestamp}.L2.MAPOL_OCEAN.V3_0.nc"
+            download_url_nrt = f"http://oceandata.sci.gsfc.nasa.gov/getfile/PACE_HARP2.{timestamp}.L2.MAPOL_OCEAN.V3_0.NRT.nc"
             
-            f.write(f"<h2 style='text-align: center; margin-top: 50px;'>Timestamp: {timestamp}</h2>\n")
+            # Add the timestamp line with a satellite icon/link
+            f.write(f"<h2 style='text-align: center; margin-top: 50px;'>")
+            f.write(f"Timestamp: {timestamp} ")
+            #🚀 🐾 ⬇️
+            f.write(f"<a href='{download_url}' class='title-link' target='_blank' title='Download Data'> Refined ⬇️</a>")
+            f.write(f"<a href='{download_url_nrt}' class='title-link' target='_blank' title='Download Data'> NRT ⬇️ </a>")
+            f.write("</h2>\n")
+            # Add a horizontal line after the title
+            f.write("<hr style='border: 1px solid #ccc;'>\n")
+
+            #f.write(f"<h2 style='text-align: center; margin-top: 50px;'>Timestamp: {timestamp}</h2>\n")
             f.write("<div class='gallery'>\n")
             write_gallery_section(images, f, sequence, titlev, resolution_factor, quality)
             f.write("</div>\n")
@@ -115,6 +141,20 @@ def create_html_from_subfolders(image_groups, output_html, sequence, \
     print(f"✅ Combined HTML gallery written to {output_html}")
 
 
+def write_single_image(image, file_handle, resolution_factor=1, quality=85):
+    """
+    Write images from a section into a gallery following the provided sequence and custom titles.
+    """
+    encoded_image = encode_image_to_base64(image, factor=resolution_factor, quality=quality)
+    css_class = "small"
+    caption=''
+    if encoded_image:
+        file_handle.write("<div>\n")        
+        file_handle.write(f"<div class='img-container {css_class}'>\n")
+        file_handle.write(f"<img src='data:image/jpeg;base64,{encoded_image}' alt='{caption}' />\n")
+        file_handle.write(f"<div class='caption'>{caption}</div>\n</div>\n")
+        file_handle.write("</div>\n")
+        
 def write_gallery_section(image_list, file_handle, sequence, titlev, resolution_factor=1, quality=85):
     """
     Write images from a section into a gallery following the provided sequence and custom titles.

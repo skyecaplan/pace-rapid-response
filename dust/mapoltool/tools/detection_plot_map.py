@@ -37,13 +37,17 @@ def plot_l1c_l2(file1, plot_path, \
                 vmax1v = [1, 1, 1, 1],
                 cmap1v = ['YlOrRd', 'jet', 'jet', 'jet'],
                 wavelength_index = 1,
+                aod_min = None
                 ):
     """
+    file1: L2 data file
     plot_path: where is the images
     iv: harp2 rgb angles
     lc_folder: where to save
-
+    
     key1v: define a list of data to be plotted
+
+    aod_min: used to screen out data except aod
     
     """
     ########## get l2 data ########################
@@ -81,7 +85,7 @@ def plot_l1c_l2(file1, plot_path, \
     #plot bounding box
     fileout= plot_path2+'pace_harp2'+'_'+timestamp3+'_globe.png'
     print(fileout)
-    plot_bounding_box_glob(lat2, lon2, timestamp3, fileout=fileout)
+    boundingbox, center = plot_bounding_box_glob(lat2, lon2, timestamp3, fileout=fileout)
 
     #plot l1 rgb
     title = 'PACE HARP2 FastMAPOL L2 @'+ timestamp3
@@ -92,12 +96,19 @@ def plot_l1c_l2(file1, plot_path, \
 
 
     #plot l2 data
-
+    #file1: l2 data file, aod_min for data selection
+    npixel_valid0, npixel_valid1,filter1 = filter_data(file1, wavelength_index = 1, aot_min = aod_min)
+    
     for i1, key1 in enumerate(key1v):
         try:
             tmp3 = dataset2[key1].values[:,:, wavelength_index]
         except:
             tmp3 = dataset2[key1].values[:,:]
+
+        if(aod_min and (key1!='aot')):
+            #if aod_min is valid, screen data, except for aod itself
+            tmp3 = np.where(filter1, tmp3, np.nan)
+            
     
         #title = 'PACE HARP2 FastMAPOL L2 @'+ timestamp3
         #cbar_label = key1
@@ -109,6 +120,8 @@ def plot_l1c_l2(file1, plot_path, \
         plot_rgb(lon2, lat2, tmp2, tmp3, figsize = (10, 5), \
                  vmin1=vmin1v[i1], vmax1=vmax1v[i1], cmap=cmap1v[i1], \
                  title=title, fileout=fileout, cbar_label=cbar_label)
+
+    return timestamp3, boundingbox, center
         
 def plot_l2_product(lat, lon, data, plot_range, label, title, vmin, vmax, figsize=(12, 4), cmap="viridis"):
     """Make map and histogram (default)."""
@@ -291,13 +304,22 @@ def plot_bounding_box_glob(lat, lon, timestamp, xbin=15, ybin=15, title=None, fi
     ax.set_global()
     
     # Add map features
-    ax.add_feature(cfeature.LAND, facecolor='lightgray', edgecolor='black', linewidth=0.5)
-    ax.add_feature(cfeature.OCEAN, facecolor='lightblue', edgecolor='black', linewidth=0.5)
+    ax.add_feature(cartopy.feature.OCEAN, edgecolor='w',linewidth=0.01)
+    ax.add_feature(cartopy.feature.LAND, edgecolor='w',linewidth=0.01)
+    #ax.add_feature(cfeature.LAND, facecolor='lightgray', edgecolor='black', linewidth=0.5)
+    #ax.add_feature(cfeature.OCEAN, facecolor='lightblue', edgecolor='black', linewidth=0.5)
     ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
     
     # Step 4: Plot the bounding box as a polygon
     lons = [min_lon, max_lon, max_lon, min_lon, min_lon]
     lats = [min_lat, min_lat, max_lat, max_lat, min_lat]
+
+    lons = [lon[0,0], lon[0,-1], lon[-1,-1], lon[-1,0],lon[0,0]]
+    lats = [lat[0,0], lat[0,-1], lat[-1,-1], lat[-1,0],lat[0,0]]
+
+    boundingbox = [lats, lons]
+    center = [central_lat, central_lon]
+    
     ax.plot(lons, lats, transform=ccrs.Geodetic(), color='red', linewidth=2, label='Bounding Box')
     
     # Step 5: Add the timestamp as a text annotation
@@ -323,5 +345,77 @@ def plot_bounding_box_glob(lat, lon, timestamp, xbin=15, ybin=15, title=None, fi
     if fileout:
         plt.savefig(fileout, dpi=300, bbox_inches='tight', pad_inches=0.1)
         
+    # Show the plot
+    #plt.show()
+    return boundingbox, center
+
+def plot_bounding_boxes(boxv, title=None, fileout=None):
+    """
+    Plot bounding boxes with text labels for timestamps on a global map.
+
+    Parameters:
+    ----------
+    boxv : list of dict
+        List of bounding boxes and metadata in the format:
+        [
+            {
+                "timestamp": str,
+                "bounding_box": {"lats": [lat1, lat2, ...], "lons": [lon1, lon2, ...]},
+                "center": [central_lat, central_lon]
+            },
+            ...
+        ]
+    title : str, optional
+        Title for the map (default: None).
+    fileout : str, optional
+        If provided, saves the plot to the specified image file (default: None).
+    """
+    # Step 1: Set up the map projection
+    fig = plt.figure(figsize=(12, 6))
+    ax = plt.axes(projection=ccrs.PlateCarree())
+    ax.set_global()
+    #ax.coastlines()
+    #ax.add_feature(cartopy.feature.BORDERS, linestyle=":")
+    ax.add_feature(cartopy.feature.OCEAN, edgecolor='w',linewidth=0.01)
+    ax.add_feature(cartopy.feature.LAND, edgecolor='w',linewidth=0.01)
+    #ax.add_feature(cfeature.LAND, facecolor="lightgray", edgecolor="black", linewidth=0.5)
+    #ax.add_feature(cfeature.OCEAN, facecolor="lightblue", edgecolor="blue", linewidth=0.5)
+    ax.gridlines(draw_labels=True, dms=True, x_inline=False, y_inline=False)
+
+    # Step 2: Loop through each item in boxv
+    for box in boxv:
+        timestamp = box[0] #box["timestamp"]
+        bbox_lats = box[1][0] #box["bounding_box"]["lats"]
+        bbox_lons = box[1][1] #box["bounding_box"]["lons"]
+        center_lat, center_lon = box[2] #box["center"]
+
+        # Plot the bounding box as a polygon
+        lats, lons = bbox_lats, bbox_lons
+        #print(timestamp, lons, lats)
+        ax.plot(lons, lats, transform=ccrs.Geodetic(), color='red', linewidth=2, label='Bounding Box')
+        
+        #ax.plot(
+        #    bbox_lons + [bbox_lons[0]], bbox_lats + [bbox_lats[0]],  # Close the polygon
+        #    transform=ccrs.PlateCarree(), color="red", linewidth=2
+        #)
+
+        # Annotate the timestamp near the bounding box
+        ax.text(
+            center_lon+5, center_lat-15, f"{timestamp}",
+            transform=ccrs.PlateCarree(), fontsize=10, color="blue",
+            ha="center", va="center",
+            bbox=dict(facecolor="white", edgecolor="blue", alpha=0.7),
+            rotation=10
+        )
+
+    # Step 3: Add title if provided
+    if title:
+        plt.title(title, fontsize=14)
+
+    # Step 4: Save the plot if fileout is specified
+    if fileout:
+        plt.savefig(fileout, dpi=300, bbox_inches="tight", pad_inches=0.1)
+        print(f"✅ Plot saved to {fileout}")
+
     # Show the plot
     plt.show()

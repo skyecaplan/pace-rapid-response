@@ -67,14 +67,17 @@ def select_data(filelist_l2, aod_min = 0.3, npixel_min = 100*100):
             print('total valid pixel, valid pixel selected:', npixel_valid0, npixel_valid1)
     return filev2
 
-def make_plot(filev2, plot_path, l1c_path="./data/", flag_cloud=True):
+def make_plot(filev2, plot_path, l1c_path="./data/", flag_cloud=True, aod_min=None):
     """generate plots according to filev2"""
     
     os.makedirs(plot_path, exist_ok=True)
     os.makedirs(l1c_path, exist_ok=True)
-    
+
+    boxv = []
     for file1 in filev2[:]:
         try:
-            plot_l1c_l2(file1, plot_path, l1c_path=l1c_path, flag_cloud=flag_cloud)
+            timestamp3, boundingbox, center = plot_l1c_l2(file1, plot_path, l1c_path=l1c_path, flag_cloud=flag_cloud, aod_min=aod_min)
+            boxv.append([timestamp3, boundingbox, center])
         except:
             print('failed', file1)
+    return boxv
