@@ -17,6 +17,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cmocean
+from PIL import Image, ImageEnhance
 from pathlib import Path
 from matplotlib import rcParams
 
@@ -146,6 +147,88 @@ def L3_quickplot_dataarray_MK(dataarray, title=None, cmap=cmocean.cm.haline, cla
 
     return fig, ax, plot, cbar
 
+def plot_xrarray_map(dataset, var_str, fig, ax, cmap=cmocean.cm.haline, vmin=None, vmax=None, log_scale=True, output_path=None):
+    """
+    Generalized function to plot a variable from an xarray.Dataset.
+
+    Parameters:
+    - dataset: xarray.Dataset containing the variable to plot.
+    - var_str: Name of the variable in the dataset to plot.
+    - bbox: Tuple of (min_lon, min_lat, max_lon, max_lat) for plot limits.
+    - vmin: Minimum value for color normalization (optional).
+    - vmax: Maximum value for color normalization (optional).
+    - log_scale: Boolean to toggle between LogNorm (True) and linear scale (False).
+    - output_path: Optional path to save the figure. If None, the plot is not saved.
+
+    Returns:
+    - fig: The matplotlib figure object.
+    - ax: The matplotlib axis object.
+    - plot: The xarray plot object.
+    - cbar: The matplotlib colorbar object.
+    """
+    #fig, ax = plt.subplots(figsize=(5, 4), subplot_kw={'projection': ccrs.PlateCarree()})
+    #ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
+    #ax.coastlines()
+
+    # Dynamically calculate vmin and vmax if not provided
+    if vmin is None:
+        vmin = dataset[var_str].min().item()
+    if vmax is None:
+        vmax = dataset[var_str].max().item()
+
+    # Determine normalization based on log_scale
+    norm = LogNorm(vmin=vmin, vmax=vmax) if log_scale else None
+
+    # Plot the data
+    # plot = dataset[var_str].plot(
+    #     x="longitude",
+    #     y="latitude",
+    #     ax=ax,
+    #     cmap=cmap,
+    #     norm=norm,
+    #     extend="neither",
+    #     robust=False,
+    #     add_colorbar=False,
+    #     vmin=vmin,
+    #     vmax=vmax 
+    # )
+    dataset['chlor_a'].plot(x="longitude", y="latitude", cmap=cmocean.cm.haline, norm=LogNorm(vmin=.01, vmax=5), extend="neither")
+
+    # Add and customize the colorbar
+    #cbar = plt.colorbar(plot, ax=ax, orientation='vertical', pad=0.05)
+    #cbar.set_label(var_str)  # Use the variable name as the label
+
+    # Save the figure if output_path is provided
+    if output_path:
+        plt.savefig(output_path, dpi=300)
+
+    #return plot, cbar
+
+def plot_xrarray_map2(dataset, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vmax=None, log_scale=True, output_path=None):
+    """
+    Generalized function to plot a variable from an xarray.Dataset with 2D lat/lon and Cartopy axis.
+    """
+    data = dataset[var_str]
+    lon = dataset['longitude']
+    lat = dataset['latitude']
+
+    if vmin is None:
+        vmin = np.nanmin(data.values)
+    if vmax is None:
+        vmax = np.nanmax(data.values)
+
+    norm = LogNorm(vmin=vmin, vmax=vmax) if log_scale else None
+
+    # Use pcolormesh for Cartopy axes and 2D coordinates
+    mesh = ax.pcolormesh(lon, lat, data, cmap=cmap, norm=norm, shading='auto', transform=ccrs.PlateCarree())
+    cbar = plt.colorbar(mesh, ax=ax, orientation='vertical', pad=0.05, fraction=0.03)
+    cbar.set_label(var_str)
+
+    if output_path:
+        plt.savefig(output_path, dpi=300)
+
+    return mesh, cbar
+
 def select_data_MK(filelist_l2, aod_min = 0.3, npixel_min = 100*100):
     """
     select data based on aod_min and min npixel
@@ -197,3 +280,42 @@ def make_plot(filev2, plot_path, l1c_path="./data/", flag_cloud=True):
             plot_l1c_l2(file1, plot_path, l1c_path=l1c_path, flag_cloud=flag_cloud)
         except:
             print('failed', file1)
+
+def enhance(rgb, scale = 0.01, vmin = 0.01, vmax = 1.04, gamma=0.95, contrast=1.2, brightness=1.1, sharpness=2, saturation=1.1):
+    """The SeaDAS recipe for RGB images from Ocean Color missions.
+
+    Args:
+        rgb: a data array with three dimensions, having 3 or 4 bands in the third dimension
+        scale: scale value for the log transform
+        vmin: minimum pixel value for the image
+        vmax: maximum pixel value for the image
+        gamma: exponential factor for gamma correction
+        contrast: amount of pixel value differentiation 
+        brightness: pixel values (intensity)
+        sharpness: amount of detail
+        saturation: color intensity
+
+    Returns:
+       a transformed data array better for RGB display
+    """
+    rgb = rgb.where(rgb > 0)
+    rgb = np.log(rgb / scale) / np.log(1 / scale)
+    rgb = rgb.where(rgb >= vmin, vmin)
+    rgb = rgb.where(rgb <= vmax, vmax)    
+    rgb_min = rgb.min(("number_of_lines", "pixels_per_line"))
+    rgb_max = rgb.max(("number_of_lines", "pixels_per_line"))
+    rgb = (rgb - rgb_min) / (rgb_max - rgb_min)
+    rgb = rgb * gamma
+    img = rgb * 255
+    img = img.where(img.notnull(), 0).astype("uint8")
+    img = Image.fromarray(img.data)
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(contrast)
+    enhancer = ImageEnhance.Brightness(img)
+    img = enhancer.enhance(brightness)
+    enhancer = ImageEnhance.Sharpness(img)
+    img = enhancer.enhance(sharpness)
+    enhancer = ImageEnhance.Color(img)
+    img = enhancer.enhance(saturation)
+    rgb[:] = np.array(img) / 255
+    return rgb
