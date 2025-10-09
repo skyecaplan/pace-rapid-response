@@ -29,7 +29,7 @@ def download_l2_cloud(tspan, short_name="PACE_HARP2_L2_MAPOL_OCEAN_NRT"):
     
     return filelist_l2
 
-def download_l3_chl_MK(tspan, short_name="PACE_OCI_L3M_CHL_NRT", granule_name="*.DAY.*4km*"):
+def download_l3_chl_MK(tspan, data_path, short_name="PACE_OCI_L3M_CHL_NRT", granule_name="*.DAY.*4km*"):
     """download ata using earthaccess"""
     
     results = earthaccess.search_data(
@@ -39,15 +39,15 @@ def download_l3_chl_MK(tspan, short_name="PACE_OCI_L3M_CHL_NRT", granule_name="*
     )
 
     ###save into a temporary path as listed in filelist_l2
-    filelist_l2 = earthaccess.download(results, local_path="data_chl/20250915") #MK edit for testings
+    filelist_l2 = earthaccess.download(results, local_path=data_path) #MK edit for testings
     
     return filelist_l2
 
-def download_l3_chl_previous_MK(tspan, short_name="PACE_OCI_L3M_CHL_NRT", granule_name="*.DAY.*4km*"):
-    """download ata using earthaccess"""
+def download_l3_chl_previous_MK(tspan, data_path, short_name="PACE_OCI_L3M_CHL_NRT", granule_name="*.DAY.*4km*"):
+    """download data using earthaccess"""
     
     # Determine new tspan for previous 30 days
-    original_date = "2025-09-15"
+    original_date = tspan[0]
     date_format = "%Y-%m-%d"
     start_date = datetime.strptime(original_date, date_format)
 
@@ -63,7 +63,7 @@ def download_l3_chl_previous_MK(tspan, short_name="PACE_OCI_L3M_CHL_NRT", granul
     )
 
     ###save into a temporary path as listed in filelist_l2
-    filelist_l2 = earthaccess.download(results, local_path="data_chl/prior30") #MK edit for testings
+    filelist_l2 = earthaccess.download(results, local_path=data_path) #MK edit for testings
     
     return filelist_l2
 
@@ -230,3 +230,103 @@ def download_l1c_web(file1, l1c_path):
     # Find all .nc files in the l1c_path directory that match the timestamp
     filelist_l1c = list(Path(l1c_path).glob(f"*{timestamp3}*.nc"))
     return filelist_l1c
+
+# def download_open_l2(results, cloud_flag=True, local_path='default_L2/'):
+#     """
+#     Download or open a list of L2 granule files from earthdatasearch results
+
+#     This function takes a list of paired granule results (e.g., output from l2_unique_granules_paired),
+#     flattens it into a single list, and either opens the files directly (cloud mode) or downloads them
+#     to a local directory. The function returns the list of file paths.
+
+#     Parameters
+#     ----------
+#     results : list of paired granule results from earthdatasearch
+#         Paired granule results, where each tuple contains granule dictionaries for a scene.
+#     cloud_flag : bool, optional
+#         If True, use earthaccess.open to access files (recommended for cloud environments).
+#         If False, download files to the specified local_path.
+#     local_path : str, optional
+#         Directory to download files if not in the cloud. Default is 'default_L2/'.
+
+#     Returns
+#     -------
+#     paths : list of str
+#         List of file paths to the opened or downloaded granule files.
+
+#     Notes
+#     -----
+#     - The function flattens the input list of tuples into a single list of granule dictionaries.
+#     - In cloud mode, files are accessed directly without downloading.
+#     - In local mode, files are downloaded to the specified directory, which is created if it does not exist.
+
+#     Example
+#     -------
+#     >>> paths = download_open_l2(final_results, cloud_flag=True)
+#     """
+#     flat_results = [item for items in results for item in items]
+#     if cloud_flag == False:
+#         paths = earthaccess.open(flat_results)
+#     else:
+#         os.makedirs(local_path, exist_ok=True)
+#         paths = earthaccess.download(flat_results, local_path=local_path)
+#         print('Files Downloaded: '+str(len(paths)))
+#     return paths
+
+def download_open_l2(results, data_path=None, cloud_flag=False):
+    """
+    Download or open a list of L2 granule files from earthdatasearch results, preserving pairing.
+
+    This function takes a list of paired granule results (e.g., output from l2_unique_granules_paired),
+    and either opens the files directly (cloud mode) or downloads them to a local directory.
+    The function returns a list of tuples, where each tuple contains file paths for the paired granules.
+
+    Parameters
+    ----------
+    results : list of tuple
+        Paired granule results, where each tuple contains granule dictionaries for a scene.
+    cloud_flag : bool, optional
+        If True, use earthaccess.open to access files (recommended for cloud environments).
+        If False, download files to the specified local_path.
+    local_path : str, optional
+        Directory to download files if not in the cloud. Default is 'default_L2/'.
+
+    Returns
+    -------
+    final_paths : list of tuple
+        Each tuple contains file paths for the paired granules, matching the structure of results.
+
+    Notes
+    -----
+    - The function works for any number of products (columns) in the paired results.
+    - In cloud mode, files are accessed directly without downloading.
+    - In local mode, files are downloaded to the specified directory, which is created if it does not exist.
+
+    Example
+    -------
+    >>> final_paths = download_open_l2(final_results, cloud_flag=True)
+    """
+    import os
+
+    # Transpose results to get a list for each product
+    num_products = len(results[0])
+    granule_lists = [[] for _ in range(num_products)]
+    for pair in results:
+        for i, granule in enumerate(pair):
+            granule_lists[i].append(granule)
+
+    # Download or open for each product
+    file_lists = []
+    # if not cloud_flag:
+    #     os.makedirs(local_path, exist_ok=True)
+    for granules in granule_lists:
+        if cloud_flag:
+            files = earthaccess.open(granules)
+        else:
+            files = earthaccess.download(granules, local_path=data_path)
+        file_lists.append(files)
+
+    # Zip together the file paths to preserve pairing
+    final_paths = list(zip(*file_lists))
+    print('Files Downloaded: ' + str(sum(len(files) for files in file_lists)))
+    return final_paths

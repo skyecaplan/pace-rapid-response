@@ -26,7 +26,7 @@ import cartopy
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
-from tools.detection_download_MK import *
+from detection_download_MK import *
 
 
 def plot_l1c_l2(file1, plot_path, \
