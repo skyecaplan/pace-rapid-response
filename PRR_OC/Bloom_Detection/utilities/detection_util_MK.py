@@ -1,58 +1,245 @@
 """
-Setup the function calls
-Meng Gao, Sep 25, 2025
+detection_util_MK.py
 
-Need specify proper directories
-Note that earthaccess download, use a defult folder of ./data
+Utility functions for PACE Phytoplankton Bloom Detection and Visualization.
+
+This .py file provides tools for:
+- Downloading and opening L2/L3 granule data from NASA Earthdata.
+- Calculating chlorophyll-a anomalies and identifying bloom bounding boxes.
+- Filtering and pairing L2 granules by spatial overlap and pixel validity.
+- Plotting L2/L3 data, including overlays, bounding boxes, and enhanced RGB composites.
+- General utilities for file management and geospatial analysis.
+
+Authors:
+    Matthew Kehrli, NASA/GSFC, 2025-10-01
+
+Dependencies:
+    - earthaccess
+    - requests
+    - numpy
+    - xarray
+    - matplotlib
+    - cartopy
+    - cmocean
+    - Pillow (PIL)
+    - pathlib
+
+Usage:
+    Import this module in your analysis scripts or notebooks:
+        from detection_util_MK import *
 """
 
-import earthaccess
-import requests
-
+# --- Standard library imports ---
 import os
 import glob
+import subprocess
+from pathlib import Path
+from datetime import datetime, timedelta
+
+# --- Third-party imports ---
+import requests
 import numpy as np
 import xarray as xr
-
 import matplotlib.pyplot as plt
+from matplotlib import rcParams
+from matplotlib.colors import LogNorm
 import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 import cmocean
 from PIL import Image, ImageEnhance
-from pathlib import Path
-from matplotlib import rcParams
 
-from detection_html_all_MK import *
-from detection_plot_map_MK import *
-from detection_download_MK import *
-
-import os
-import requests
-import subprocess
-from matplotlib.colors import LogNorm
+# --- NASA Earthdata access ---
+import earthaccess
 
 
-    
+def download_open_l2(results, data_path=None, cloud_flag=False):
+    """
+    Download or open a list of L2 granule files from earthdatasearch results, preserving pairing.
+
+    This function takes a list of paired granule results (e.g., output from l2_unique_granules_paired),
+    and either opens the files directly (cloud mode) or downloads them to a local directory.
+    The function returns a list of tuples, where each tuple contains file paths for the paired granules.
+
+    Parameters
+    ----------
+    results : list of tuple
+        Paired granule results, where each tuple contains granule dictionaries for a scene.
+    cloud_flag : bool, optional
+        If True, use earthaccess.open to access files (recommended for cloud environments).
+        If False, download files to the specified local_path.
+    local_path : str, optional
+        Directory to download files if not in the cloud. Default is 'default_L2/'.
+
+    Returns
+    -------
+    final_paths : list of tuple
+        Each tuple contains file paths for the paired granules, matching the structure of results.
+
+    Notes
+    -----
+    - The function works for any number of products (columns) in the paired results.
+    - In cloud mode, files are accessed directly without downloading.
+    - In local mode, files are downloaded to the specified directory, which is created if it does not exist.
+
+    Example
+    -------
+    >>> final_paths = download_open_l2(final_results, cloud_flag=True)
+    """
+    #import os
+
+    # Transpose results to get a list for each product
+    num_products = len(results[0])
+    granule_lists = [[] for _ in range(num_products)]
+    for pair in results:
+        for i, granule in enumerate(pair):
+            granule_lists[i].append(granule)
+
+    # Download or open for each product
+    file_lists = []
+    # if not cloud_flag:
+    #     os.makedirs(local_path, exist_ok=True)
+    for granules in granule_lists:
+        if cloud_flag:
+            files = earthaccess.open(granules)
+        else:
+            files = earthaccess.download(granules, local_path=data_path)
+        file_lists.append(files)
+
+    # Zip together the file paths to preserve pairing
+    final_paths = list(zip(*file_lists))
+    print('Files Downloaded: ' + str(sum(len(files) for files in file_lists)))
+    return final_paths
+
+def download_l3_chl_MK(tspan, data_path, short_name="PACE_OCI_L3M_CHL_NRT", granule_name="*.DAY.*4km*"):
+    """
+    Search for and download PACE L3 chlorophyll-a granule files using earthaccess.
+
+    This function queries NASA Earthdata for L3 chlorophyll-a granules matching the specified
+    time span and granule name pattern, then downloads the results to the specified local directory.
+
+    Parameters
+    ----------
+    tspan : tuple of str
+        Time span for the search, e.g., ("2025-09-15", "2025-09-15").
+    data_path : str
+        Local directory to save downloaded files.
+    short_name : str, optional
+        Earthdata product short name (default: "PACE_OCI_L3M_CHL_NRT").
+    granule_name : str, optional
+        Granule name pattern to match (default: "*.DAY.*4km*").
+
+    Returns
+    -------
+    filelist_l2 : list of str
+        List of file paths to the downloaded L3 granule files.
+
+    Example
+    -------
+    >>> files = download_l3_chl_MK(('2025-09-15', '2025-09-15'), './data/20250915/L3/')
+    """
+    results = earthaccess.search_data(
+        short_name=short_name,
+        temporal=tspan,
+        granule_name=granule_name
+    )
+
+    filelist_l3 = earthaccess.download(results, local_path=data_path)
+    return filelist_l3
+
+def download_l3_chl_previous_MK(tspan, data_path, short_name='PACE_OCI_L3M_CHL_NRT', granule_name='*.DAY.*4km*'):
+    """
+    Search for and download PACE L3 chlorophyll-a granule files for the previous 30 days using earthaccess.
+
+    This function computes a new time span covering the 30 days prior to the given start date in 'tspan',
+    queries NASA Earthdata for L3 chlorophyll-a granules matching the specified granule name pattern,
+    and downloads the results to the specified local directory.
+
+    Parameters
+    ----------
+    tspan : tuple of str
+        Time span for the search, e.g., ('2025-09-15', '2025-09-15').
+        Only the first date is used to determine the previous 30-day window.
+    data_path : str
+        Local directory to save downloaded files.
+    short_name : str, optional
+        Earthdata product short name (default: 'PACE_OCI_L3M_CHL_NRT').
+    granule_name : str, optional
+        Granule name pattern to match (default: '*.DAY.*4km*').
+
+    Returns
+    -------
+    filelist_l3 : list of str
+        List of file paths to the downloaded L3 granule files for the previous 30 days.
+
+    Example
+    -------
+    >>> files = download_l3_chl_previous_MK(('2025-09-15', '2025-09-15'), './data/20250915/L3/')
+    """
+    # Determine new tspan for previous 30 days
+    original_date = tspan[0]
+    date_format = "%Y-%m-%d"
+    start_date = datetime.strptime(original_date, date_format)
+
+    thirty_days_prior = (start_date - timedelta(days=30)).strftime(date_format)
+    one_day_prior = (start_date - timedelta(days=1)).strftime(date_format)
+
+    tspan = (thirty_days_prior, one_day_prior)
+
+    results = earthaccess.search_data(
+        short_name=short_name,
+        temporal=tspan,
+        granule_name=granule_name
+    )
+
+    filelist_l3 = earthaccess.download(results, local_path=data_path)
+    return filelist_l3
+
+  
 def setup_data(tspan):
     """
-    setup folders, and download l2 data
-    tspan: time range
+    Set up directory structure for data, figures, and HTML output for a given time span.
+
+    This function creates the necessary folders for storing L2/L3 data, plots, and HTML files
+    for a specified date (taken as the first element of `tspan`). All directories are created
+    if they do not already exist. The function returns the paths to these directories.
+
+    Parameters
+    ----------
+    tspan : tuple of str
+        Time span for the analysis, e.g., ('2025-09-15', '2025-09-15').
+        Only the first date is used to determine the folder structure.
+
+    Returns
+    -------
+    data_path : str
+        Path to the main data directory for the date.
+    l2_path : str
+        Path to the L2 data subdirectory.
+    l3_path : str
+        Path to the L3 data subdirectory.
+    plot_path : str
+        Path to the directory for saving PNG figures.
+    html_path : str
+        Path to the directory for saving HTML output.
+
+    Example
+    -------
+    >>> data_path, l2_path, l3_path, plot_path, html_path = setup_data(('2025-09-15', '2025-09-15'))
     """
-    date_str = tspan[0]
-    date_str = date_str.replace('-', '')
-    ## cannot change, default for download tool
-    data_path = './data/' + date_str
+    date_str = tspan[0].replace('-', '')
+    data_path = f'./data/{date_str}'
     os.makedirs(data_path, exist_ok=True)
 
-    l2_path = './data/' + date_str + '/L2/'
+    l2_path = f'./data/{date_str}/L2/'
     os.makedirs(l2_path, exist_ok=True)
 
-    l3_path = './data/' + date_str + '/L3/'
+    l3_path = f'./data/{date_str}/L3/'
     os.makedirs(l3_path, exist_ok=True)
 
-    plot_path = './figures/' + date_str + '/png/'
+    plot_path = f'./figures/{date_str}/png/'
     os.makedirs(plot_path, exist_ok=True)
 
-    html_path = './figures/' + date_str + '/html/'
+    html_path = f'./figures/{date_str}/html/'
     os.makedirs(html_path, exist_ok=True)
 
     # Convert to absolute paths for printing
@@ -64,32 +251,6 @@ def setup_data(tspan):
           f"{os.path.abspath(html_path)}")
 
     return data_path, l2_path, l3_path, plot_path, html_path
-
-def calc_chl_anomaly_MK(filelist_l3, filelist_l3_previous):
-    """
-    calculate the 30-day chl anomaly of filelist_l3
-    """
-
-    dataset = xr.open_mfdataset(filelist_l3_previous, combine='nested', concat_dim='time')
-    window_mean = dataset['chlor_a'].mean("time")
-    print(dataset)
-
-    return dataset 
-    # chl_all = []
-    # for i1 in range(len(filelist_l3)):
-    #     file1 = filelist_l3[i1]
-    #     print(file1)
-    
-    #     datatree = xr.open_datatree(file1)
-    #     dataset = xr.merge(datatree.to_dict().values())
-        
-    #     chl = dataset["chlor_a"].values
-    #     chl_all.append(chl)
-    
-    # chl_all = np.array(chl_all)
-    # chl_mean = np.nanmean(chl_all, axis=0)
-    
-    # return chl_mean
 
 def L3_quickplot_dataarray_MK(dataarray, title=None, cmap=cmocean.cm.haline, clabel=None, vmin=None, vmax=None, log_scale=True, output_path=None):
     """
@@ -189,24 +350,7 @@ def plot_xrarray_map(dataset, var_str, fig, ax, cmap=cmocean.cm.haline, vmin=Non
     # Determine normalization based on log_scale
     norm = LogNorm(vmin=vmin, vmax=vmax) if log_scale else None
 
-    # Plot the data
-    # plot = dataset[var_str].plot(
-    #     x="longitude",
-    #     y="latitude",
-    #     ax=ax,
-    #     cmap=cmap,
-    #     norm=norm,
-    #     extend="neither",
-    #     robust=False,
-    #     add_colorbar=False,
-    #     vmin=vmin,
-    #     vmax=vmax 
-    # )
     dataset['chlor_a'].plot(x="longitude", y="latitude", cmap=cmocean.cm.haline, norm=LogNorm(vmin=.01, vmax=5), extend="neither")
-
-    # Add and customize the colorbar
-    #cbar = plt.colorbar(plot, ax=ax, orientation='vertical', pad=0.05)
-    #cbar.set_label(var_str)  # Use the variable name as the label
 
     # Save the figure if output_path is provided
     if output_path:
@@ -924,3 +1068,196 @@ def add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts):
             #     color='red', fontsize=8, ha='center', va='center',
             #     transform=ccrs.PlateCarree()
             # )
+
+def plot_save_BGC_l2_overlay(l2_data_paths,save_path, var_name, l3_bboxes, granule_bbox_pixel_counts, vmin=None, vmax=None, cmap=cmocean.cm.haline, log_scale=True, show_fig=True, figsave=False):
+    """
+    Plot and optionally save overlays of BGC L2 granules with bounding boxes.
+
+    Parameters
+    ----------
+    l2_data_paths : list
+        List of tuples, each containing file paths for a granule (e.g., (SFREFL_path, BGC_path)).
+    save_path : str
+        Directory to save figures.
+    var_name : str
+        Variable name to plot from BGC file.
+    l3_bboxes : list
+        List of bounding boxes for overlay.
+    granule_bbox_pixel_counts : dict
+        Mapping of path to bbox pixel counts.
+    vmin, vmax, cmap, log_scale : plotting options
+    show_fig : bool
+        If True, display the figure.
+    figsave : bool
+        If True, save the figure to disk.
+
+    Returns
+    -------
+    None
+    """
+    for i, path in enumerate(l2_data_paths):
+        try:
+            sref_idx = [j for j, p in enumerate(path) if 'SFREFL' in p][0]
+            bgc_idx = [j for j, p in enumerate(path) if 'BGC' in p][0]
+        except IndexError:
+            print(f"Could not find SFREFL or BGC in path tuple: {path}")
+            continue
+
+        fig, ax = plot_setup(map_props(path[sref_idx]))
+        plot_rgb_from_path(path[sref_idx], ax)
+        plot_var_from_path(path[bgc_idx], var_name, ax, vmin=vmin, vmax=vmax, cmap=cmap, log_scale=log_scale)
+        add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
+        
+        if figsave:
+            # Extract date_time from filename, fallback to index if not found
+            basename = os.path.basename(path[0])
+            parts = basename.split('.')
+            date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
+            out_dir = os.path.join(save_path, date_time)
+            os.makedirs(out_dir, exist_ok=True)
+            fname = f"{date_time}_{var_name}_overlay.png"
+            plt.savefig(os.path.join(out_dir, fname), dpi=300, bbox_inches='tight')
+            if show_fig:
+                plt.show()
+        else:
+            if show_fig:
+                plt.show()
+        plt.close()
+
+def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=True, figsave=False):
+    """
+    Plot and optionally save L3 daily, 30-day mean, and chlorophyll-a anomaly maps,
+    with bounding boxes overlaid on the appropriate plots.
+
+    Parameters
+    ----------
+    l3_ds_target : xarray.Dataset
+        Target day L3 dataset.
+    l3_ds_window : xarray.Dataset
+        30-day window L3 dataset.
+    l3_bboxes : list
+        List of bounding boxes (min_lon, min_lat, max_lon, max_lat).
+    savepath : str
+        Directory to save figures.
+    show_fig : bool
+        If True, display the figures.
+    figsave : bool
+        If True, save the figures to disk.
+
+    Returns
+    -------
+    None
+    """
+    import os
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+    import cmocean
+
+    # Calculate chlorophyll-a anomaly
+    chl_anomaly = l3_ds_target['chlor_a'] - l3_ds_window['chlor_a'].mean(dim='time')
+    date_str = l3_ds_target.product_name.split('.')[1]
+
+    # 1. Daily chlorophyll-a
+    fig1, ax1, plot1, cbar1 = L3_quickplot_dataarray_MK(
+        l3_ds_target['chlor_a'],
+        title=f'{date_str} Chlorophyll-a',
+        cmap=cmocean.cm.haline,
+        clabel='Chlorophyll-a [mg/m^3]',
+        vmin=0.01, vmax=5,
+        log_scale=True,
+        output_path=None
+    )
+    ax1.add_feature(cfeature.LAND, facecolor='lightgray')
+    ax1.add_feature(cfeature.OCEAN, facecolor='white')
+
+    # 2. 30-day mean
+    fig2, ax2, plot2, cbar2 = L3_quickplot_dataarray_MK(
+        l3_ds_window['chlor_a'].mean(dim='time'),
+        title='Chlorophyll-a 30-day Mean',
+        cmap=cmocean.cm.haline,
+        clabel='Chlorophyll-a [mg/m^3]',
+        vmin=0.01, vmax=5,
+        log_scale=True,
+        output_path=None
+    )
+    ax2.add_feature(cfeature.LAND, facecolor='lightgray')
+    ax2.add_feature(cfeature.OCEAN, facecolor='white')
+
+    # 3. Anomaly (linear scale, can be negative)
+    fig3, ax3, plot3, cbar3 = L3_quickplot_dataarray_MK(
+        chl_anomaly,
+        title='Chlorophyll-a Anomaly (From 30-day Mean)',
+        cmap=cmocean.cm.balance,
+        clabel='Chlorophyll-a [mg/m^3]',
+        vmin=-1, vmax=1,
+        log_scale=False,
+        output_path=None
+    )
+    ax3.add_feature(cfeature.LAND, facecolor='lightgray')
+    ax3.add_feature(cfeature.OCEAN, facecolor='white')
+
+    # 4. Daily chlorophyll-a with bounding boxes
+    fig4, ax4, plot4, cbar4 = L3_quickplot_dataarray_MK(
+        l3_ds_target['chlor_a'],
+        title=f'{date_str} Chlorophyll-a',
+        cmap=cmocean.cm.haline,
+        clabel='Chlorophyll-a [mg/m^3]',
+        vmin=0.01, vmax=5,
+        log_scale=True,
+        output_path=None
+    )
+    ax4.add_feature(cfeature.LAND, facecolor='lightgray')
+    ax4.add_feature(cfeature.OCEAN, facecolor='white')
+    for bbox in l3_bboxes:
+        min_lon, min_lat, max_lon, max_lat = bbox
+        width = max_lon - min_lon
+        height = max_lat - min_lat
+        rect = patches.Rectangle(
+            (min_lon, min_lat), width, height,
+            linewidth=2, edgecolor='red', facecolor='none',
+            transform=ccrs.PlateCarree()
+        )
+        ax4.add_patch(rect)
+
+    # 5. 30-day mean with bounding boxes
+    fig5, ax5, plot5, cbar5 = L3_quickplot_dataarray_MK(
+        l3_ds_window['chlor_a'].mean(dim='time'),
+        title='Chlorophyll-a 30-day Mean',
+        cmap=cmocean.cm.haline,
+        clabel='Chlorophyll-a [mg/m^3]',
+        vmin=0.01, vmax=5,
+        log_scale=True,
+        output_path=None
+    )
+    ax5.add_feature(cfeature.LAND, facecolor='lightgray')
+    ax5.add_feature(cfeature.OCEAN, facecolor='white')
+    for bbox in l3_bboxes:
+        min_lon, min_lat, max_lon, max_lat = bbox
+        width = max_lon - min_lon
+        height = max_lat - min_lat
+        rect = patches.Rectangle(
+            (min_lon, min_lat), width, height,
+            linewidth=2, edgecolor='red', facecolor='none',
+            transform=ccrs.PlateCarree()
+        )
+        ax5.add_patch(rect)
+
+    # Save or show figures
+    if figsave:
+        os.makedirs(savepath, exist_ok=True)
+        fig1.savefig(os.path.join(savepath, f'L3_Chl_{date_str}.png'), dpi=300)
+        fig2.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}.png'), dpi=300)
+        fig3.savefig(os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}.png'), dpi=300)
+        fig4.savefig(os.path.join(savepath, f'L3_Chl_{date_str}_bboxes.png'), dpi=300)
+        fig5.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}_bboxes.png'), dpi=300)
+    if show_fig:
+        plt.show()
+    # Close all figures to free memory
+    plt.close(fig1)
+    plt.close(fig2)
+    plt.close(fig3)
+    plt.close(fig4)
+    plt.close(fig5)
