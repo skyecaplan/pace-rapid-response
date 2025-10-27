@@ -15,19 +15,7 @@ sys.path.append(util_path)
 # importlib.reload(detection_util_MK)
 from detection_util_MK import Bloom_Detection
 
-# Run Code
+# %% Run Code
 Bloom_Detection('20250916')
-
-
-
-
-
-
-
-
-
-
-
-
 
 # %%
