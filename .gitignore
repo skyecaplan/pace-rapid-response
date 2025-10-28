@@ -185,6 +185,6 @@ PRR_OC/local_data
 .DS_Store 
 
 # Misc. file to ignore (MK add feel free to delete if it poses a problem to your Git workflow)
-.png
-.zip
+*.png
+*.zip
 
