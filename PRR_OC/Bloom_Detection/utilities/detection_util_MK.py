@@ -90,7 +90,7 @@ def Bloom_Detection(date_str):
 
 
     # Plot and save L3 daily, 30-day mean, and Chlorophyll-a anomaly
-    #L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path, show_fig=False, figsave=True)
+    L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path, show_fig=False, figsave=True)
 
 
     # Locate Unique L2 Granules Corresponding to L3 Chlorophyll-a Anomaly Bounding Boxes
@@ -585,6 +585,105 @@ def L3_quickplot_dataarray_MK(dataarray, title=None, cmap=cmocean.cm.haline, cla
 
     return fig, ax, plot, cbar
 
+# def l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=['PACE_OCI_L2_SFREFL_NRT','PACE_OCI_L2_SFREFL_NRT'],print_flag=False):
+#     """
+#     Search for unique L2 granules across all identified bounding boxes and product, and pair results by scene.
+
+#     This function queries Earthdata for L2 granules for each bounding box in l3_bboxes and for each
+#     product in short_names over the specified time span, tspan. It deduplicates granules by their
+#     native-id for each product, then pairs the unique results by index, so each tuple in the output
+#     corresponds to a set of L2 files (one per product) for the same scene.
+
+#     Parameters
+#     ----------
+#     l3_bboxes : list of tuple
+#         List of bounding boxes, each as (min_lon, min_lat, max_lon, max_lat).
+#     tspan : tuple of str
+#         Time span for the search, e.g., ("2025-09-15", "2025-09-15").
+#     short_names : list of str, optional
+#         List of Earthdata product short names to search for. Default is two SFREFL products.
+#     print_summary : bool, optional
+#         If True, print summary information about the search and results.
+
+#     Returns
+#     -------
+#     final_results : list of tuple
+#         Each tuple contains (results_shortname1, results_shortname2, ...) for a scene,
+#         where each element is a granule dictionary for the corresponding product.
+
+#     Notes
+#     -----
+#     - The pairing is by index, so it assumes the order of unique granules matches across products.
+#     - If the number of unique granules differs between products, only pairs up to the shortest list are returned.
+#     - Each granule is deduplicated by its 'meta'['native-id'] field.
+
+#     Example
+#     -------
+#     >>> short_names = ['PACE_OCI_L2_SFREFL_NRT', 'PACE_OCI_L2_BGC_NRT']
+#     >>> pairs = l2_unique_granules_paired(l3_bboxes, tspan, short_names=short_names, print_summary=True)
+#     """
+#     all_results_per_shortname = [[] for _ in short_names]
+
+#     for bbox in l3_bboxes:
+#         for i, short_name in enumerate(short_names):
+#             results = earthaccess.search_data(
+#                 short_name=short_name,
+#                 temporal=tspan,
+#                 bounding_box=bbox,
+#                 version="3.1"
+#             )
+#             all_results_per_shortname[i].extend(results)
+#             if print_flag:
+#                 print(f" Number of granules for {short_name} in bbox {bbox}: {len(results)}")
+
+#     # Deduplicate by native-id for each product type
+#     unique_results_per_shortname = []
+#     for results in all_results_per_shortname:
+#         unique = {}
+#         for result in results:
+#             unique[result['meta']['native-id']] = result
+#         unique_results_per_shortname.append(list(unique.values()))
+
+#     final_results = list(zip(*unique_results_per_shortname))
+    
+#     if print_flag:
+#         print("Total unique granules found for each product:")
+#         for short_name, unique in zip(short_names, unique_results_per_shortname):
+#             print(f"  {short_name}: {len(unique)}")
+#         print(f"Total scenes found: {sum(len(pairs) for pairs in final_results)}")
+#     return final_results
+
+def get_timestamp(result):
+    native_id = result['meta']['native-id']
+    match = re.search(r'(\d{8}T\d{6})', native_id)
+    return match.group(1) if match else None
+
+def match_granules_by_native_id(results_list):
+    """Match granules across product types using their native-id timestamp."""
+    # Build dictionaries mapping timestamp to granules for each product
+    timestamp_dicts = []
+    for results in results_list:
+        ts_dict = {}
+        for result in results:
+            ts = get_timestamp(result)
+            if ts:
+                ts_dict[ts] = result
+        timestamp_dicts.append(ts_dict)
+    
+    # Find intersection of timestamps across all products
+    common_timestamps = set(timestamp_dicts[0].keys())
+    for ts_dict in timestamp_dicts[1:]:
+        common_timestamps &= set(ts_dict.keys())
+    
+    # Build final matched list
+    matched_granules = []
+    for ts in sorted(common_timestamps):
+        matched_granules.append(
+            tuple(ts_dict[ts] for ts_dict in timestamp_dicts)
+        )
+    
+    return matched_granules
+
 def l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=['PACE_OCI_L2_SFREFL_NRT','PACE_OCI_L2_SFREFL_NRT'],print_flag=False):
     """
     Search for unique L2 granules across all identified bounding boxes and product, and pair results by scene.
@@ -644,13 +743,16 @@ def l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=['PACE_OCI_L2_SFREFL_NRT
             unique[result['meta']['native-id']] = result
         unique_results_per_shortname.append(list(unique.values()))
 
-    final_results = list(zip(*unique_results_per_shortname))
+    #final_results = list(zip(*unique_results_per_shortname))   # Original pairing method BAD - leads to mis-matches
+    final_results = match_granules_by_native_id(unique_results_per_shortname) # Bug fix
     
     if print_flag:
         print("Total unique granules found for each product:")
         for short_name, unique in zip(short_names, unique_results_per_shortname):
             print(f"  {short_name}: {len(unique)}")
         print(f"Total scenes found: {sum(len(pairs) for pairs in final_results)}")
+        print(f"Total matched granule sets: {len(final_results)}")
+        
     return final_results
 
 def download_open_l2(results, data_path=None, cloud_flag=False):
@@ -878,6 +980,9 @@ def plot_save_TC_l2(l2_data_paths, save_path, l3_bboxes, granule_bbox_pixel_coun
     -------
     None
     """
+    #Status of TC plotting
+    print(f"Generating {len(l2_data_paths)} true color plots of identified L2 granules...")
+
     for i, path in enumerate(l2_data_paths):
         try:
             sref_idx = [j for j, p in enumerate(path) if 'SFREFL' in str(p)][0]
@@ -933,6 +1038,9 @@ def plot_save_BGC_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, gran
     -------
     None
     """
+    # Status of BGC plotting
+    print(f"Generating {len(l2_data_paths)} {var_name} plots of identified L2 granules...")
+
     for i, path in enumerate(l2_data_paths):
         try:
             sref_idx = [j for j, p in enumerate(path) if 'SFREFL' in str(p)][0]
@@ -988,6 +1096,9 @@ def plot_save_AOP_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, gran
     -------
     None
     """
+     # Status of AOP plotting
+    print(f"Generating {len(l2_data_paths)} {var_name} plots of identified L2 granules...")
+
     for i, path in enumerate(l2_data_paths):
         try:
             sref_idx = [j for j, p in enumerate(path) if 'SFREFL' in str(p)][0]
@@ -1590,6 +1701,9 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
     -------
     None
     """
+    # Status of chl-a anomaly per granule plotting
+    print(f"Generating chlorophyll-a anomaly plots of identified L2 granules...")
+
     # Compute chlorophyll-a anomaly
     chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
     date_str = l3_ds_target.product_name.split('.')[1]
