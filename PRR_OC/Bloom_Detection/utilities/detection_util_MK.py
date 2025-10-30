@@ -72,7 +72,7 @@ def Bloom_Detection(date_str):
     # Define file paths, and download data    
     auth = earthaccess.login(persist=True) # Login to Earthdata using stored credentials
     tspan = (yyyymmdd_to_iso(date_str), yyyymmdd_to_iso(date_str)) #Convert date string to ISO format
-    data_path, l2_path, l3_path, plot_path, html_path = setup_data(tspan) # Setup data directories
+    data_path, l2_path, l3_path, sst_path, plot_path, html_path = setup_data(tspan) # Setup data directories
     # Download L3 data for 30 days prior to target date
     filelist_l3_all = download_l3_all_chl(tspan, l3_path,
                                           days_prior=30,
@@ -115,7 +115,10 @@ def Bloom_Detection(date_str):
     plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'poc', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.turbid, vmin=10, vmax=10000, show_fig=False, figsave=True)
     plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'carbon_phyto', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.speed, vmin=10, vmax=1000, show_fig=False, figsave=True)
     plot_save_AOP_l2_overlay(l2_data_paths_filt, plot_path, 'avw', l3_bboxes, granule_bbox_pixel_counts, vmin=400, vmax=700, log_scale=False, show_fig=False, figsave=True)
-    plot_save_AOP_l2_overlay(l2_data_paths_filt, plot_path, 'nflh', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.thermal, vmin=0, log_scale=False, show_fig=False, figsave=True)
+    plot_save_AOP_l2_overlay(l2_data_paths_filt, plot_path, 'nflh', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.thermal, vmin=0, vmax=1, log_scale=False, show_fig=False, figsave=True)
+    
+    # Generate and Save auxiliary plots (SST and SST Anomaly Overlays)
+    plot_save_SST_overlay(l2_data_paths_filt, sst_path , plot_path, tspan, l3_bboxes, granule_bbox_pixel_counts, show_fig=False, figsave=True)
 
 
 def yyyymmdd_to_iso(date_str):
@@ -165,6 +168,9 @@ def setup_data(tspan):
     l3_path = f'./data/{date_str}/L3/'
     os.makedirs(l3_path, exist_ok=True)
 
+    sst_path = f'./data/{date_str}/SST/'
+    os.makedirs(sst_path, exist_ok=True)
+
     plot_path = f'./figures/{date_str}/png/'
     os.makedirs(plot_path, exist_ok=True)
 
@@ -176,10 +182,11 @@ def setup_data(tspan):
     print(f"{os.path.abspath(data_path)}\n"
           f"{os.path.abspath(l2_path)}\n"
           f"{os.path.abspath(l3_path)}\n"
+          f"{os.path.abspath(sst_path)}\n"
           f"{os.path.abspath(plot_path)}\n"
           f"{os.path.abspath(html_path)}")
 
-    return data_path, l2_path, l3_path, plot_path, html_path
+    return data_path, l2_path, l3_path, sst_path, plot_path, html_path
 
 def download_l3_all_chl(tspan, data_path, days_prior=30, short_name='PACE_OCI_L3M_CHL_NRT', granule_name='*.DAY.*4km*'):
     """
@@ -1956,3 +1963,177 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window,l2_data_paths_filt, save
         plt.show()
     # Close all figures to free memory
     plt.close(fig)
+
+def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, granule_bbox_pixel_counts, show_fig=True, figsave=False):
+    # Status of SST plotting
+    print(f"Generating {len(l2_data_paths)} SST and SST anomaly plots of identified L2 granules "
+        "using 0.25 deg GHRSST Level 4 (MUR25-JPL-L4-GLOB-v04.2) dataset. "
+        "For more information please see: "
+        "https://podaac.jpl.nasa.gov/dataset/MUR-JPL-L4-GLOB-v4.1..."
+    )
+
+    #short_name = "MUR-JPL-L4-GLOB-v4.1"
+    short_name = "MUR25-JPL-L4-GLOB-v04.2"
+
+    # Add HH:MM:SS (set to noon) to temporal span
+    tspan = (f"{tspan[0]} 12:00:00", f"{tspan[1]} 12:00:00")
+
+    results = earthaccess.search_data(
+        short_name=short_name,
+        temporal=tspan,
+    )
+
+    sst_file_path = earthaccess.download(results, local_path=datapath)
+    sst_dt = xr.open_datatree(sst_file_path[0], decode_timedelta=True)
+    sst_ds = xr.merge(sst_dt.to_dict().values())
+
+    
+    for i, path in enumerate(l2_data_paths):
+        try:
+            BGC_idx = [j for j, p in enumerate(path) if 'BGC' in str(p)][0]
+        except IndexError:
+            print(f"Could not find BGC in path tuple: {path}")
+
+        # Open the BGC file and extract coordinates
+        dt = xr.open_datatree(path[BGC_idx], decode_timedelta=True)
+        ds = xr.merge(dt.to_dict().values())
+        ds = ds.set_coords(("longitude", "latitude"))
+
+        # Determine longitude/latitude extent, handling dateline crossing
+        lons = ds['longitude'].values
+        lats = ds['latitude'].values
+        min_lon = np.nanmin(lons)
+        max_lon = np.nanmax(lons)
+        min_lat = np.nanmin(lats)
+        max_lat = np.nanmax(lats)
+        if max_lon - min_lon > 180:
+            lon_360 = lons % 360
+            lon_ex_min = np.nanmin(lon_360)
+            lon_ex_max = np.nanmax(lon_360)
+        else:
+            lon_ex_min = min_lon
+            lon_ex_max = max_lon
+
+        # Compute average map center
+        meanlon = float(np.nanmean(ds['longitude'].values))
+        meanlat = float(np.nanmean(ds['latitude'].values))
+
+        # Set up figure and axis for SST
+        fig, ax = plt.subplots(
+            figsize=(10, 8),
+            subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
+        )
+        #Add map features for context
+        ax.add_feature(cfeature.LAND, facecolor='lightgray',zorder=1)
+        ax.add_feature(cfeature.OCEAN, facecolor='white')
+        ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
+        ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
+        ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
+
+        # Draw granule outline (clockwise)
+        edge_lon = np.concatenate([lons[0, :], lons[1:, -1], lons[-1, ::-1], lons[-2::-1, 0]])
+        edge_lat = np.concatenate([lats[0, :], lats[1:, -1], lats[-1, ::-1], lats[-2::-1, 0]])
+
+        # Convert longitudes to [-180, 180] for PlateCarree
+        edge_lon = ((edge_lon + 180) % 360) - 180
+        # Split outline at dateline crossing
+        jump = np.abs(np.diff(edge_lon))
+        split_idx = np.where(jump > 180)[0] + 1
+        edge_lon_plot = np.split(edge_lon, split_idx) if split_idx.size > 0 else [edge_lon]
+        edge_lat_plot = np.split(edge_lat, split_idx) if split_idx.size > 0 else [edge_lat]
+        for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
+            ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
+
+        # Restrict dataarray to L2 granule extent for efficiency
+        dataarray = sst_ds['analysed_sst'].squeeze('time') - 273.15  # Convert from Kelvin to Celsius and squeeze time dimension
+        dataarray = dataarray.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
+
+        plot = ax.pcolormesh(
+            dataarray["lon"],
+            dataarray["lat"],
+            dataarray,
+            cmap=cmocean.cm.thermal,
+            shading="auto",
+            transform=ccrs.PlateCarree(),
+            vmin = 0,
+            vmax = 20,
+            zorder=0  # Set zorder here directly
+        )
+
+        # Add colorbar
+        cbar = plt.colorbar(plot, ax=ax, orientation='horizontal', pad=0.05)
+        cbar.set_label('SST [\u00b0C]')
+
+        # Overlay bounding boxes for this granule
+        add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
+
+        if figsave:
+            # Extract date_time from filename, fallback to index if not found
+            basename = os.path.basename(path[0])
+            parts = basename.split('.')
+            date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
+            out_dir = os.path.join(savepath, date_time)
+            os.makedirs(out_dir, exist_ok=True)
+            fname =  f'{date_time}_GHRSSTL4_SST_L2gran_bboxes.png'
+            plt.savefig(os.path.join(out_dir, fname), dpi=300, bbox_inches='tight')
+            if show_fig:
+                plt.show()
+        else:
+            if show_fig:
+                plt.show()
+        plt.close()
+
+        # Set up figure and axis for SST Anomaly
+        fig, ax = plt.subplots(
+            figsize=(10, 8),
+            subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
+        )
+        #Add map features for context
+        ax.add_feature(cfeature.LAND, facecolor='lightgray',zorder=1)
+        ax.add_feature(cfeature.OCEAN, facecolor='white')
+        ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
+        ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
+        ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
+
+        # Draw granule outline (clockwise)
+        for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
+            ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
+
+        # Restrict dataarray to L2 granule extent for efficiency
+        dataarray = sst_ds['sst_anomaly'].squeeze('time')
+        dataarray = dataarray.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
+
+        plot = ax.pcolormesh(
+            dataarray["lon"],
+            dataarray["lat"],
+            dataarray,
+            cmap=cmocean.cm.balance,
+            shading="auto",
+            transform=ccrs.PlateCarree(),
+            vmin=-3,
+            vmax=3,
+            zorder=0  # Set zorder here directly
+        )
+
+        # Add colorbar
+        cbar = plt.colorbar(plot, ax=ax, orientation='horizontal', pad=0.05)
+        cbar.set_label(dataarray.name + ' [\u00b0C]')
+
+        # Overlay bounding boxes for this granule
+        add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
+
+        if figsave:
+            # Extract date_time from filename, fallback to index if not found
+            basename = os.path.basename(path[0])
+            parts = basename.split('.')
+            date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
+            out_dir = os.path.join(savepath, date_time)
+            os.makedirs(out_dir, exist_ok=True)
+            fname =  f'{date_time}_GHRSSTL4_SST_Anomaly_L2gran_bboxes.png'
+            plt.savefig(os.path.join(out_dir, fname), dpi=300, bbox_inches='tight')
+            if show_fig:
+                plt.show()
+        else:
+            if show_fig:
+                plt.show()
+        plt.close()
