@@ -68,57 +68,267 @@ import earthaccess   # NASA Earthdata cloud and data access
 # Set default plotting parameters
 rcParams['font.size'] = '16' 
 
-def Bloom_Detection(date_str):
-    # Define file paths, and download data    
-    auth = earthaccess.login(persist=True) # Login to Earthdata using stored credentials
-    tspan = (yyyymmdd_to_iso(date_str), yyyymmdd_to_iso(date_str)) #Convert date string to ISO format
-    data_path, l2_path, l3_path, sst_path, plot_path, html_path = setup_data(tspan) # Setup data directories
+def Bloom_Detection(date_str, dpi=100, delete_flag=False):
+    """
+    Generate a complete phytoplankton bloom detection workflow for PACE OCI data.
+
+    This function automates the full detection pipeline for a specified date, encompassing:
+    1. Data download and setup
+    2. L3 chlorophyll-a anomaly calculation and bounding box identification
+    3. L2 granule discovery and filtering
+    4. Multi-variable visualization (True Color, BGC parameters, AOP metrics, SST)
+
+    The workflow generates a comprehensive set of maps and overlays comparing L3 anomalies
+    with L2 granule observations across multiple ocean color products.
+
+    Parameters
+    ----------
+    date_str : str
+        Target date in 'YYYYMMDD' format (e.g., '20250916').
+    dpi : int, optional
+        Resolution of saved figures in dots per inch (default: 100).
+
+    Returns
+    -------
+    None
+
+    Workflow Stages
+    ---------------
+    **Stage 1: Initialization & Data Download**
+        - Authenticate with NASA Earthdata
+        - Create directory structure for data and outputs
+        - Download 30-day historical L3 chlorophyll-a data
+        - Download target-day L3 chlorophyll-a data
+
+    **Stage 2: L3 Anomaly Detection**
+        - Compute chlorophyll-a anomaly (target - 30-day mean)
+        - Identify bounding boxes with anomaly ≥ 1 mg/m³
+        - Generate L3 maps (daily, 30-day mean, anomaly, with/without bboxes)
+
+    **Stage 3: L2 Granule Discovery & Filtering**
+        - Search for matching L2 granules (SFREFL, BGC, AOP products)
+        - Download or open L2 files from cloud
+        - Filter by spatial overlap with L3 bboxes
+        - Filter by valid pixel count (>5000 pixels/bbox, lat ±89.5°)
+
+    **Stage 4: Visualization & Output**
+        - Global map: L2 granule outlines on L3 anomaly background
+        - Individual granule outlines on Orthographic projections
+        - L3 anomaly restricted to L2 granule extents
+        - True Color RGB composites
+        - BGC overlays: Chlorophyll-a, POC, phytoplankton carbon
+        - AOP overlays: Average wavelength (avw), NFLH
+        - SST and SST anomaly overlays from GHRSST Level 4
+
+    Output Organization
+    -------------------
+    All outputs are organized by date (YYYYMMDD):
+    - `./data/{YYYYMMDD}/L2/` - Downloaded L2 granules
+    - `./data/{YYYYMMDD}/L3/` - Downloaded L3 granules
+    - `./data/{YYYYMMDD}/SST/` - Downloaded SST data
+    - `./figures/{YYYYMMDD}/png/` - All generated PNG figures (organized by granule date/time)
+    - `./figures/{YYYYMMDD}/html/` - Reserved for HTML reports
+
+    Notes
+    -----
+    - Requires active Earthdata login credentials (stored locally)
+    - All L2 filtering uses 0-360° longitude convention
+    - Dateline crossing is automatically handled in visualizations
+    - True Color enhancement uses SeaDAS recipe for Ocean Color missions
+    - SST data source: GHRSST Level 4 (MUR25-JPL-L4-GLOB-v04.2) at 0.25° resolution
+
+    Raises
+    ------
+    FileNotFoundError
+        If L3 data cannot be found for the target date (may indicate missing data).
+    earthaccess.EarthAccessError
+        If authentication fails or data products are unavailable.
+
+    Example
+    -------
+    >>> from detection_util_MK import Bloom_Detection
+    >>> Bloom_Detection('20250916', dpi=150)
+
+    See Also
+    --------
+    l3_anomaly_bbox : Identify anomaly bounding boxes
+    filter_l2_by_valid : Filter L2 granules by validity
+    plot_L2_granule_outlines : Global map of L2 granule coverage
+    plot_save_SST_overlay : SST visualization on L2 granules
+    """
+    
+    # ========== STAGE 1: INITIALIZATION & DATA DOWNLOAD ==========
+    print("=" * 80)
+    print(f"BLOOM DETECTION PIPELINE - Target Date: {date_str}")
+    print("=" * 80)
+    
+    # Authenticate with Earthdata
+    print("\n[Stage 1] Initializing system and downloading data...")
+    auth = earthaccess.login(persist=True)
+    
+    # Convert date format and setup directories
+    tspan = (yyyymmdd_to_iso(date_str), yyyymmdd_to_iso(date_str))
+    print(tspan)
+    print(delete_flag)
+    data_path, l2_path, l3_path, sst_path, plot_path, html_path = setup_data(tspan)
+    
     # Download L3 data for 30 days prior to target date
-    filelist_l3_all = download_l3_all_chl(tspan, l3_path,
-                                          days_prior=30,
-                                          short_name='PACE_OCI_L3M_CHL_NRT',
-                                          granule_name='*.DAY.*4km*'
-                                        ) 
+    print(f"\nDownloading 30-day L3 chlorophyll-a dataset...")
+    filelist_l3_all = download_l3_all_chl(
+        tspan, l3_path,
+        days_prior=30,
+        short_name='PACE_OCI_L3M_CHL_NRT',
+        granule_name='*.DAY.*4km*'
+    )
 
+    # ========== STAGE 2: L3 ANOMALY DETECTION ==========
+    print("\n[Stage 2] Computing L3 chlorophyll-a anomalies...")
+    
+    # Open L3 datasets
+    l3_ds_target = xr.open_mfdataset(filelist_l3_all[-1], combine='nested', concat_dim='time')
+    l3_ds_window = xr.open_mfdataset(filelist_l3_all[0:-1], combine='nested', concat_dim='time')
 
-    # Calculate 30-day mean, compute Chlorophyll-a anomaly, and identify bounding boxes with anomaly >= 1mg/m^3
-    l3_ds_target = xr.open_mfdataset(filelist_l3_all[-1], combine='nested', concat_dim='time') # open current day L3 data for anomaly calculation
-    l3_ds_window = xr.open_mfdataset(filelist_l3_all[0:-1], combine='nested', concat_dim='time') # open previous day L3 data for anomaly calculation
-
-    # Identify L3 Bounding Boxes with Chlorophyll-a Anomaly Greater Than 1 mg/m^3
+    # Identify L3 bounding boxes with significant chlorophyll-a anomalies
     l3_bboxes, l3_bboxes_0360 = l3_anomaly_bbox(l3_ds_target, l3_ds_window)
+    print(f"Identified {len(l3_bboxes)} anomaly bounding boxes (anomaly ≥ 1 mg/m³)")
 
+    # Generate L3 maps
+    L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path, show_fig=False, figsave=True, dpi=dpi)
 
-    # Plot and save L3 daily, 30-day mean, and Chlorophyll-a anomaly
-    L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path, show_fig=False, figsave=True)
-
-
-    # Locate Unique L2 Granules Corresponding to L3 Chlorophyll-a Anomaly Bounding Boxes
+    # ========== STAGE 3: L2 GRANULE DISCOVERY & FILTERING ==========
+    print("\n[Stage 3] Discovering and filtering L2 granules...")
+    
+    # Search for L2 granules matching L3 bboxes
     short_names = ['PACE_OCI_L2_SFREFL_NRT', 'PACE_OCI_L2_BGC_NRT', 'PACE_OCI_L2_AOP_NRT']
     final_results = l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=short_names, print_flag=False)
+    print(f"Found {len(final_results)} matched L2 scenes across {len(short_names)} products")
 
-
-    # Download or Cloud Open L2 Data
+    # Download or open L2 data
     l2_data_paths = download_open_l2(final_results, data_path=l2_path)
 
-
-    # Filter Data
+    # Filter L2 granules by spatial overlap and valid pixel count
     l2_data_paths_filt, granule_bbox_pixel_counts = filter_l2_by_valid(l2_data_paths, l3_bboxes_0360)
+    print(f"Retained {len(l2_data_paths_filt)} L2 granules after filtering")
 
-
-    # Generate and Save Plots
-    plot_L2_granule_outlines(l3_ds_target, l3_ds_window,l2_data_paths_filt, plot_path, show_fig=False, figsave=True)
-    plot_granule_outline(l2_data_paths_filt, plot_path, show_fig=False, figsave=True)
-    plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts, l2_data_paths_filt, plot_path, show_fig=False, figsave=True)
-    plot_save_TC_l2(l2_data_paths_filt, plot_path, l3_bboxes, granule_bbox_pixel_counts, show_fig=False, figsave=True)
-    plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'chlor_a', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.algae, vmin=0.1, vmax=30, show_fig=False, figsave=True)
-    plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'poc', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.turbid, vmin=10, vmax=10000, show_fig=False, figsave=True)
-    plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'carbon_phyto', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.speed, vmin=10, vmax=1000, show_fig=False, figsave=True)
-    plot_save_AOP_l2_overlay(l2_data_paths_filt, plot_path, 'avw', l3_bboxes, granule_bbox_pixel_counts, vmin=400, vmax=700, log_scale=False, show_fig=False, figsave=True)
-    plot_save_AOP_l2_overlay(l2_data_paths_filt, plot_path, 'nflh', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.thermal, vmin=0, vmax=1, log_scale=False, show_fig=False, figsave=True)
+    # ========== STAGE 4: VISUALIZATION & OUTPUT ==========
+    print("\n[Stage 4] Generating visualization products...")
     
-    # Generate and Save auxiliary plots (SST and SST Anomaly Overlays)
-    plot_save_SST_overlay(l2_data_paths_filt, sst_path , plot_path, tspan, l3_bboxes, granule_bbox_pixel_counts, show_fig=False, figsave=True)
+    # Global map: L2 granule outlines on L3 anomaly
+    plot_L2_granule_outlines(
+        l3_ds_target, l3_ds_window, l2_data_paths_filt, plot_path,
+        show_fig=False, figsave=True, dpi=dpi
+    )
+    
+    # Individual granule outlines on Orthographic projections
+    plot_granule_outline(l2_data_paths_filt, plot_path, show_fig=False, figsave=True, dpi=dpi)
+    
+    # L3 anomaly restricted to L2 granule extents
+    plot_L3_anomaly_on_L2_granules(
+        l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts,
+        l2_data_paths_filt, plot_path, show_fig=False, figsave=True, dpi=dpi
+    )
+    
+    # True Color RGB composites
+    plot_save_TC_l2(
+        l2_data_paths_filt, plot_path, l3_bboxes, granule_bbox_pixel_counts,
+        show_fig=False, figsave=True, dpi=dpi
+    )
+    
+    # BGC product overlays
+    print("  • Generating BGC product overlays...")
+    plot_save_BGC_l2_overlay(
+        l2_data_paths_filt, plot_path, 'chlor_a', l3_bboxes, granule_bbox_pixel_counts,
+        cmap=cmocean.cm.algae, vmin=0.1, vmax=30, show_fig=False, figsave=True, dpi=dpi
+    )
+    plot_save_BGC_l2_overlay(
+        l2_data_paths_filt, plot_path, 'poc', l3_bboxes, granule_bbox_pixel_counts,
+        cmap=cmocean.cm.turbid, vmin=10, vmax=10000, show_fig=False, figsave=True, dpi=dpi
+    )
+    plot_save_BGC_l2_overlay(
+        l2_data_paths_filt, plot_path, 'carbon_phyto', l3_bboxes, granule_bbox_pixel_counts,
+        cmap=cmocean.cm.speed, vmin=10, vmax=1000, show_fig=False, figsave=True, dpi=dpi
+    )
+    
+    # AOP product overlays
+    print("  • Generating AOP product overlays...")
+    plot_save_AOP_l2_overlay(
+        l2_data_paths_filt, plot_path, 'avw', l3_bboxes, granule_bbox_pixel_counts,
+        vmin=400, vmax=700, log_scale=False, show_fig=False, figsave=True, dpi=dpi
+    )
+    plot_save_AOP_l2_overlay(
+        l2_data_paths_filt, plot_path, 'nflh', l3_bboxes, granule_bbox_pixel_counts,
+        cmap=cmocean.cm.thermal, vmin=0, vmax=1, log_scale=False, show_fig=False, figsave=True, dpi=dpi
+    )
+
+    # SST and SST anomaly overlays
+    print("  • Generating SST and SST anomaly overlays...")
+    plot_save_SST_overlay(
+        l2_data_paths_filt, sst_path, plot_path, tspan, l3_bboxes, granule_bbox_pixel_counts,
+        show_fig=False, figsave=True, dpi=dpi
+    )
+
+    # ========== STAGE 5: LOG AND DELETE DOWNLOADED FILES ==========
+    print("\n[Stage 5] Finalizing and cleaning up...")
+    print(tspan)
+    delete_downloaded_files(tspan, delete_flag=delete_flag)
+
+    # ========== COMPLETION ==========
+    print("\n" + "=" * 80)
+    print("BLOOM DETECTION PIPELINE COMPLETE")
+    print(f"Output directory: {os.path.abspath(plot_path)}")
+    print("=" * 80 + "\n")
+
+# def Bloom_Detection(date_str, dpi=100):
+#     # Define file paths, and download data    
+#     auth = earthaccess.login(persist=True) # Login to Earthdata using stored credentials
+#     tspan = (yyyymmdd_to_iso(date_str), yyyymmdd_to_iso(date_str)) #Convert date string to ISO format
+#     data_path, l2_path, l3_path, sst_path, plot_path, html_path = setup_data(tspan) # Setup data directories
+#     # Download L3 data for 30 days prior to target date
+#     filelist_l3_all = download_l3_all_chl(tspan, l3_path,
+#                                           days_prior=30,
+#                                           short_name='PACE_OCI_L3M_CHL_NRT',
+#                                           granule_name='*.DAY.*4km*'
+#                                         ) 
+
+
+#     # Calculate 30-day mean, compute Chlorophyll-a anomaly, and identify bounding boxes with anomaly >= 1mg/m^3
+#     l3_ds_target = xr.open_mfdataset(filelist_l3_all[-1], combine='nested', concat_dim='time') # open current day L3 data for anomaly calculation
+#     l3_ds_window = xr.open_mfdataset(filelist_l3_all[0:-1], combine='nested', concat_dim='time') # open previous day L3 data for anomaly calculation
+
+#     # Identify L3 Bounding Boxes with Chlorophyll-a Anomaly Greater Than 1 mg/m^3
+#     l3_bboxes, l3_bboxes_0360 = l3_anomaly_bbox(l3_ds_target, l3_ds_window)
+
+
+#     # Plot and save L3 daily, 30-day mean, and Chlorophyll-a anomaly
+#     L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path, show_fig=False, figsave=True, dpi=dpi)
+
+
+#     # Locate Unique L2 Granules Corresponding to L3 Chlorophyll-a Anomaly Bounding Boxes
+#     short_names = ['PACE_OCI_L2_SFREFL_NRT', 'PACE_OCI_L2_BGC_NRT', 'PACE_OCI_L2_AOP_NRT']
+#     final_results = l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=short_names, print_flag=False)
+
+
+#     # Download or Cloud Open L2 Data
+#     l2_data_paths = download_open_l2(final_results, data_path=l2_path)
+
+
+#     # Filter Data
+#     l2_data_paths_filt, granule_bbox_pixel_counts = filter_l2_by_valid(l2_data_paths, l3_bboxes_0360)
+
+
+#     # Generate and Save Plots
+#     plot_L2_granule_outlines(l3_ds_target, l3_ds_window,l2_data_paths_filt, plot_path, show_fig=False, figsave=True, dpi=dpi)
+#     plot_granule_outline(l2_data_paths_filt, plot_path, show_fig=False, figsave=True, dpi=dpi)
+#     plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts, l2_data_paths_filt, plot_path, show_fig=False, figsave=True, dpi=dpi)
+#     plot_save_TC_l2(l2_data_paths_filt, plot_path, l3_bboxes, granule_bbox_pixel_counts, show_fig=False, figsave=True, dpi=dpi)
+#     plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'chlor_a', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.algae, vmin=0.1, vmax=30, show_fig=False, figsave=True, dpi=dpi)
+#     plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'poc', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.turbid, vmin=10, vmax=10000, show_fig=False, figsave=True, dpi=dpi)
+#     plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'carbon_phyto', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.speed, vmin=10, vmax=1000, show_fig=False, figsave=True, dpi=dpi)
+#     plot_save_AOP_l2_overlay(l2_data_paths_filt, plot_path, 'avw', l3_bboxes, granule_bbox_pixel_counts, vmin=400, vmax=700, log_scale=False, show_fig=False, figsave=True, dpi=dpi)
+#     plot_save_AOP_l2_overlay(l2_data_paths_filt, plot_path, 'nflh', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.thermal, vmin=0, vmax=1, log_scale=False, show_fig=False, figsave=True, dpi=dpi)
+
+#     # Generate and Save auxiliary plots (SST and SST Anomaly Overlays)
+#     plot_save_SST_overlay(l2_data_paths_filt, sst_path , plot_path, tspan, l3_bboxes, granule_bbox_pixel_counts, show_fig=False, figsave=True, dpi=dpi)
 
 
 def yyyymmdd_to_iso(date_str):
@@ -233,6 +443,25 @@ def download_l3_all_chl(tspan, data_path, days_prior=30, short_name='PACE_OCI_L3
     )
 
     filelist_l3 = earthaccess.download(results, local_path=data_path)
+
+    # Check if the most recent file matches tspan[-1]
+    if filelist_l3:
+        # Extract date from the most recent file (format: YYYYMMDD)
+        latest_file = filelist_l3[-1]
+        # Match pattern like "20250916" in filename
+        match = re.search(r'\.(\d{8})\.', latest_file)
+        if match:
+            file_date = match.group(1)
+            file_date_str = f"{file_date[:4]}-{file_date[4:6]}-{file_date[6:8]}"
+            
+            if file_date_str != tspan[-1]:
+                import warnings
+                warnings.warn(
+                    f"Most recent L3 file date ({file_date_str}) does not match tspan end date ({tspan[-1]}). "
+                    f"This may indicate missing data for the requested date.",
+                    UserWarning
+                )
+    
     return filelist_l3
 
 def l3_anomaly_bbox(target_dataset, window_dataset, block_size_lat=100, block_size_lon=100, anomaly_threshold=1, count_min=1000):
@@ -336,7 +565,7 @@ def bbox_convert_long_0360(bboxes):
 
     return bbox_0360
 
-def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=True, figsave=False):
+def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=True, figsave=False, dpi=100):
     """
     Plot and optionally save L3 daily, 30-day mean, and chlorophyll-a anomaly maps,
     with bounding boxes overlaid on the appropriate plots.
@@ -496,12 +725,12 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=T
     # Save or show figures
     if figsave:
         os.makedirs(savepath, exist_ok=True)
-        fig1.savefig(os.path.join(savepath, f'L3_Chl_{date_str}.png'), dpi=100, bbox_inches='tight')
-        fig2.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}.png'), dpi=100, bbox_inches='tight')
-        fig3.savefig(os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}.png'), dpi=100, bbox_inches='tight')
-        fig4.savefig(os.path.join(savepath, f'L3_Chl_{date_str}_bboxes.png'), dpi=100, bbox_inches='tight')
-        fig5.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}_bboxes.png'), dpi=100, bbox_inches='tight')
-        fig6.savefig(os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}_bboxes.png'), dpi=100, bbox_inches='tight')
+        fig1.savefig(os.path.join(savepath, f'L3_Chl_{date_str}.png'), dpi=dpi, bbox_inches='tight')
+        fig2.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}.png'), dpi=dpi, bbox_inches='tight')
+        fig3.savefig(os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}.png'), dpi=dpi, bbox_inches='tight')
+        fig4.savefig(os.path.join(savepath, f'L3_Chl_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
+        fig5.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
+        fig6.savefig(os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
     if show_fig:
         plt.show()
     # Close all figures to free memory
@@ -512,7 +741,7 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=T
     plt.close(fig5)
     plt.close(fig6)
 
-def L3_quickplot_dataarray_MK(dataarray, title=None, cmap=cmocean.cm.haline, clabel=None, vmin=None, vmax=None, log_scale=True, output_path=None):
+def L3_quickplot_dataarray_MK(dataarray, title=None, cmap=cmocean.cm.haline, clabel=None, vmin=None, vmax=None, log_scale=True, output_path=None, dpi=100):
     """
     Generalized function to plot a variable from an xarray.DataArray.
 
@@ -588,77 +817,9 @@ def L3_quickplot_dataarray_MK(dataarray, title=None, cmap=cmocean.cm.haline, cla
 
     # Save the figure if output_path is provided
     if output_path:
-        plt.savefig(output_path, dpi=300)
+        plt.savefig(output_path, dpi=dpi)
 
     return fig, ax, plot, cbar
-
-# def l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=['PACE_OCI_L2_SFREFL_NRT','PACE_OCI_L2_SFREFL_NRT'],print_flag=False):
-#     """
-#     Search for unique L2 granules across all identified bounding boxes and product, and pair results by scene.
-
-#     This function queries Earthdata for L2 granules for each bounding box in l3_bboxes and for each
-#     product in short_names over the specified time span, tspan. It deduplicates granules by their
-#     native-id for each product, then pairs the unique results by index, so each tuple in the output
-#     corresponds to a set of L2 files (one per product) for the same scene.
-
-#     Parameters
-#     ----------
-#     l3_bboxes : list of tuple
-#         List of bounding boxes, each as (min_lon, min_lat, max_lon, max_lat).
-#     tspan : tuple of str
-#         Time span for the search, e.g., ("2025-09-15", "2025-09-15").
-#     short_names : list of str, optional
-#         List of Earthdata product short names to search for. Default is two SFREFL products.
-#     print_summary : bool, optional
-#         If True, print summary information about the search and results.
-
-#     Returns
-#     -------
-#     final_results : list of tuple
-#         Each tuple contains (results_shortname1, results_shortname2, ...) for a scene,
-#         where each element is a granule dictionary for the corresponding product.
-
-#     Notes
-#     -----
-#     - The pairing is by index, so it assumes the order of unique granules matches across products.
-#     - If the number of unique granules differs between products, only pairs up to the shortest list are returned.
-#     - Each granule is deduplicated by its 'meta'['native-id'] field.
-
-#     Example
-#     -------
-#     >>> short_names = ['PACE_OCI_L2_SFREFL_NRT', 'PACE_OCI_L2_BGC_NRT']
-#     >>> pairs = l2_unique_granules_paired(l3_bboxes, tspan, short_names=short_names, print_summary=True)
-#     """
-#     all_results_per_shortname = [[] for _ in short_names]
-
-#     for bbox in l3_bboxes:
-#         for i, short_name in enumerate(short_names):
-#             results = earthaccess.search_data(
-#                 short_name=short_name,
-#                 temporal=tspan,
-#                 bounding_box=bbox,
-#                 version="3.1"
-#             )
-#             all_results_per_shortname[i].extend(results)
-#             if print_flag:
-#                 print(f" Number of granules for {short_name} in bbox {bbox}: {len(results)}")
-
-#     # Deduplicate by native-id for each product type
-#     unique_results_per_shortname = []
-#     for results in all_results_per_shortname:
-#         unique = {}
-#         for result in results:
-#             unique[result['meta']['native-id']] = result
-#         unique_results_per_shortname.append(list(unique.values()))
-
-#     final_results = list(zip(*unique_results_per_shortname))
-    
-#     if print_flag:
-#         print("Total unique granules found for each product:")
-#         for short_name, unique in zip(short_names, unique_results_per_shortname):
-#             print(f"  {short_name}: {len(unique)}")
-#         print(f"Total scenes found: {sum(len(pairs) for pairs in final_results)}")
-#     return final_results
 
 def get_timestamp(result):
     native_id = result['meta']['native-id']
@@ -961,7 +1122,7 @@ def count_valid_pixels(ds, bbox_idx, l3_bboxes_0360, print_flag=False):
     return tolpixels, pixel_counts
 
 
-def plot_save_TC_l2(l2_data_paths, save_path, l3_bboxes, granule_bbox_pixel_counts, show_fig=True, figsave=False):
+def plot_save_TC_l2(l2_data_paths, save_path, l3_bboxes, granule_bbox_pixel_counts, show_fig=True, figsave=False, dpi=100):
     """
     Plot and optionally save overlays of BGC L2 granules with bounding boxes.
 
@@ -982,6 +1143,8 @@ def plot_save_TC_l2(l2_data_paths, save_path, l3_bboxes, granule_bbox_pixel_coun
         If True, display the figure.
     figsave : bool
         If True, save the figure to disk.
+    dpi : int
+        Resolution of saved figure.
 
     Returns
     -------
@@ -1009,7 +1172,8 @@ def plot_save_TC_l2(l2_data_paths, save_path, l3_bboxes, granule_bbox_pixel_coun
             out_dir = os.path.join(save_path, date_time)
             os.makedirs(out_dir, exist_ok=True)
             fname = f"{date_time}_TC.png"
-            plt.savefig(os.path.join(out_dir, fname), dpi=100, bbox_inches='tight')
+            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
+            print(f"Figure saved to: {os.path.join(out_dir, fname)}")
             if show_fig:
                 plt.show()
         else:
@@ -1019,7 +1183,7 @@ def plot_save_TC_l2(l2_data_paths, save_path, l3_bboxes, granule_bbox_pixel_coun
 
 
 
-def plot_save_BGC_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, granule_bbox_pixel_counts, vmin=None, vmax=None, cmap=cmocean.cm.haline, log_scale=True, show_fig=True, figsave=False):
+def plot_save_BGC_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, granule_bbox_pixel_counts, vmin=None, vmax=None, cmap=cmocean.cm.haline, log_scale=True, show_fig=True, figsave=False, dpi=100):
     """
     Plot and optionally save overlays of BGC L2 granules with bounding boxes.
 
@@ -1040,6 +1204,8 @@ def plot_save_BGC_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, gran
         If True, display the figure.
     figsave : bool
         If True, save the figure to disk.
+    dpi : int
+        Resolution of saved figure.
 
     Returns
     -------
@@ -1069,7 +1235,8 @@ def plot_save_BGC_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, gran
             out_dir = os.path.join(save_path, date_time)
             os.makedirs(out_dir, exist_ok=True)
             fname = f"{date_time}_{var_name}_overlay.png"
-            plt.savefig(os.path.join(out_dir, fname), dpi=100, bbox_inches='tight')
+            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
+            print(f"Figure saved to: {os.path.join(out_dir, fname)}")
             if show_fig:
                 plt.show()
         else:
@@ -1077,9 +1244,9 @@ def plot_save_BGC_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, gran
                 plt.show()
         plt.close()
 
-def plot_save_AOP_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, granule_bbox_pixel_counts, vmin=None, vmax=None, cmap=cmocean.cm.haline, log_scale=True, show_fig=True, figsave=False):
+def plot_save_AOP_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, granule_bbox_pixel_counts, vmin=None, vmax=None, cmap=cmocean.cm.haline, log_scale=True, show_fig=True, figsave=False, dpi=100):
     """
-    Plot and optionally save overlays of BGC L2 granules with bounding boxes.
+    Plot and optionally save overlays of AOP L2 granules with bounding boxes.
 
     Parameters
     ----------
@@ -1098,12 +1265,14 @@ def plot_save_AOP_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, gran
         If True, display the figure.
     figsave : bool
         If True, save the figure to disk.
+    dpi : int
+        Resolution of saved figure.
 
     Returns
     -------
     None
     """
-     # Status of AOP plotting
+    # Status of AOP plotting
     print(f"Generating {len(l2_data_paths)} {var_name} plots of identified L2 granules...")
 
     for i, path in enumerate(l2_data_paths):
@@ -1129,13 +1298,15 @@ def plot_save_AOP_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, gran
             out_dir = os.path.join(save_path, date_time)
             os.makedirs(out_dir, exist_ok=True)
             fname = f"{date_time}_{var_name}_overlay.png"
-            plt.savefig(os.path.join(out_dir, fname), dpi=100, bbox_inches='tight')
+            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
+            print(f"Figure saved to: {os.path.join(out_dir, fname)}")
             if show_fig:
                 plt.show()
         else:
             if show_fig:
                 plt.show()
         plt.close()
+
 
 def plot_setup(props):
     """
@@ -1238,7 +1409,7 @@ def map_props(path):
 
     return props
 
-def plot_rgb_from_path(path, ax, savefig=False, plot_path=None):
+def plot_rgb_from_path(path, ax, savefig=False, plot_path=None, dpi=100):
     """
     Plot an RGB composite from hyperspectral reflectance data on a Cartopy axis.
 
@@ -1256,6 +1427,8 @@ def plot_rgb_from_path(path, ax, savefig=False, plot_path=None):
         If True, save the figure to disk (default: False).
     plot_path : str or Path, optional
         Path to save the figure if savefig is True.
+    dpi : int, optional
+        Resolution of saved figure (default: 100).
 
     Returns
     -------
@@ -1287,7 +1460,7 @@ def plot_rgb_from_path(path, ax, savefig=False, plot_path=None):
 
     # Optionally save the figure
     if savefig and plot_path is not None:
-        plt.savefig(plot_path, dpi=100)
+        plt.savefig(plot_path, dpi=dpi)
 
     return plot
     
@@ -1354,7 +1527,7 @@ def enhance(rgb, scale = 0.01, vmin = 0.01, vmax = 1.04, gamma=0.95, contrast=1.
 
     return rgb
 
-def plot_var_from_path(path, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vmax=None, log_scale=True, output_path=None):
+def plot_var_from_path(path, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vmax=None, log_scale=True, output_path=None, dpi=100):
     """
     Plot a variable from an xarray.Dataset on a Cartopy axis with colorbar.
 
@@ -1379,6 +1552,8 @@ def plot_var_from_path(path, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vma
         If True, use logarithmic color normalization (default: True).
     output_path : str or Path, optional
         If provided, save the figure to this path.
+    dpi : int, optional
+        Resolution of saved figure (default: 100).
 
     Returns
     -------
@@ -1431,7 +1606,7 @@ def plot_var_from_path(path, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vma
     #     ax.set_title(date_time, fontsize=16)
 
     if output_path:
-        plt.savefig(output_path, dpi=300)
+        plt.savefig(output_path, dpi=dpi)
 
     return mesh, cbar
 
@@ -1563,7 +1738,7 @@ def generate_colormap(min_wavelength=380, max_wavelength=750, num_colors=256):
     cmap_ = LinearSegmentedColormap.from_list("wavelength_cmap", colors, num_colors)
     return cmap_
 
-def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False):
+def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False, dpi=100):
     """
     Plot the outline of each L2 granule on a map, handling dateline crossing.
 
@@ -1585,6 +1760,8 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False)
         If True, display the figure (default: True).
     figsave: bool, optional
         If True, save the figure to disk (default: False).
+    dpi: int, optional
+        Resolution of saved figure (default: 100).
 
     Returns
     -------
@@ -1673,7 +1850,7 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False)
             out_dir = os.path.join(save_path, date_time)
             os.makedirs(out_dir, exist_ok=True)
             fname = f"{date_time}_outline.png"
-            plt.savefig(os.path.join(out_dir, fname), dpi=100, bbox_inches='tight')
+            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
             if show_fig:
                 plt.show()
         else:
@@ -1681,7 +1858,8 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False)
                 plt.show()
         plt.close()
 
-def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts, l2_data_paths, savepath, show_fig=True, figsave=False):
+
+def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts, l2_data_paths, savepath, show_fig=True, figsave=False, dpi=100):
     """
     Plot and optionally save L3 chlorophyll-a anomaly overlays on L2 granule extents, with bounding boxes.
 
@@ -1703,6 +1881,8 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
         If True, display the figures (default: True).
     figsave : bool, optional
         If True, save the figures to disk (default: False).
+    dpi : int, optional
+        Resolution of saved figures (default: 100).
 
     Returns
     -------
@@ -1729,7 +1909,7 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
         ds = ds.set_coords(("longitude", "latitude"))
 
         # Plot L3 anomaly and L2 granule outline
-        fig, ax, plot, cbar = plot_L3_anomaly_per_L2_granule(
+        ax = plot_L3_anomaly_per_L2_granule(
             chl_anomaly,
             ds,
             cmap=cmocean.cm.balance,
@@ -1745,17 +1925,6 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
         # Overlay bounding boxes for this granule
         add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
 
-        # # Save or show figure
-        # if figsave:
-        #     os.makedirs(savepath, exist_ok=True)
-        #     fig.savefig(
-        #         os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}_bboxes_L2gran_{i}.png'),
-        #         dpi=100, bbox_inches='tight'
-        #     )
-        # if show_fig:
-        #     plt.show()
-        # plt.close(fig)
-
         if figsave:
             # Extract date_time from filename, fallback to index if not found
             basename = os.path.basename(path[0])
@@ -1764,7 +1933,8 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
             out_dir = os.path.join(savepath, date_time)
             os.makedirs(out_dir, exist_ok=True)
             fname =  f'{date_time}_L3_Chl_Anomaly_L2gran_bboxes.png'
-            plt.savefig(os.path.join(out_dir, fname), dpi=100, bbox_inches='tight')
+            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
+            print(f"Figure saved to: {os.path.join(out_dir, fname)}")
             if show_fig:
                 plt.show()
         else:
@@ -1772,7 +1942,8 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
                 plt.show()
         plt.close()
 
-def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmocean.cm.haline, clabel=None, vmin=None, vmax=None, log_scale=True, output_path=None):
+
+def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmocean.cm.haline, clabel=None, vmin=None, vmax=None, log_scale=True, output_path=None, dpi=100):
     """
     Plot an xarray.DataArray (e.g., L3 anomaly) over the spatial extent of an L2 granule.
 
@@ -1794,17 +1965,14 @@ def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmoce
         If True, use logarithmic color normalization.
     output_path : str, optional
         If provided, save the figure to this path.
+    dpi : int, optional
+        Resolution of saved figure.
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The created figure.
     ax : matplotlib.axes.Axes
         The created axis.
-    plot : QuadMesh or similar
-        The plot object.
-    cbar : matplotlib.colorbar.Colorbar
-        The colorbar object.
+
     """
     # Compute average map center
     meanlon = float(np.nanmean(l2_dataset['longitude'].values))
@@ -1832,7 +2000,8 @@ def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmoce
     )
     ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
     ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
-    ax.set_extent([lon_ex_min - 1, lon_ex_max + 1, min_lat - 1, max_lat + 1], crs=ccrs.PlateCarree())
+    #ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
+
     if title:
         ax.set_title(title)
 
@@ -1844,18 +2013,16 @@ def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmoce
     norm = LogNorm(vmin=vmin, vmax=vmax) if log_scale else None
 
     # Restrict dataarray to L2 granule extent for efficiency
-    dataarray = dataarray.sel(lon=slice(min_lon - 1, max_lon + 1), lat=slice(max_lat + 1, min_lat - 1))
+    dataarray = dataarray.sel(lon=slice(min_lon, max_lon), lat=slice(max_lat, min_lat))
 
     # Plot the data
-    plot = dataarray.plot(
-        x="lon",
-        y="lat",
-        ax=ax,
+    plot = ax.pcolormesh(
+        dataarray["lon"],
+        dataarray["lat"],
+        dataarray,
         cmap=cmap,
         norm=norm,
-        extend="neither",
-        robust=False,
-        add_colorbar=False,
+        shading='auto',
         vmin=vmin,
         vmax=vmax,
         transform=ccrs.PlateCarree()
@@ -1882,28 +2049,85 @@ def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmoce
 
     # Save if requested
     if output_path:
-        plt.savefig(output_path, dpi=300)
+        plt.savefig(output_path, dpi=dpi)
 
-    return fig, ax, plot, cbar
+    return ax
 
 
-def plot_L2_granule_outlines(l3_ds_target, l3_ds_window,l2_data_paths_filt, save_path, show_fig=True, figsave=False):
+def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, save_path, show_fig=True, figsave=False, dpi=100):
     """
-    Plot L2 granule outlines on a global map for a specific date.
+    Plot L2 granule outlines overlaid on a global chlorophyll-a anomaly map.
+
+    This function creates a global map showing the L3 chlorophyll-a anomaly as a background,
+    then overlays the outlines of all filtered L2 granules. Dateline crossing is handled by
+    splitting granule outlines at longitude jumps >180°. The resulting map provides a
+    comprehensive view of L2 granule coverage relative to identified chl-a anomalies.
 
     Parameters
     ----------
-    l2_data_paths_filt : list
-        List of L2 data path tuples.
+    l3_ds_target : xarray.Dataset
+        Target day L3 chlorophyll-a dataset.
+    l3_ds_window : xarray.Dataset
+        30-day window L3 chlorophyll-a dataset (used to compute anomaly baseline).
+    l2_data_paths_filt : list of tuple
+        List of filtered L2 granule file path tuples. Each tuple contains paths for a scene
+        (e.g., (SFREFL_path, BGC_path, AOP_path)). The BGC file (typically at index 1)
+        is used to extract coordinate information.
+    save_path : str
+        Directory to save the output figure. Created if it does not exist.
+    show_fig : bool, optional
+        If True, display the figure interactively (default: True).
+    figsave : bool, optional
+        If True, save the figure to disk as PNG (default: False).
+    dpi : int, optional
+        Resolution of saved figure in dots per inch (default: 100).
 
     Returns
     -------
     None
-    """
-    chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
-    date_str = l3_ds_target.product_name.split('.')[1]
 
-    ### Plot L2 granule outlines for a specific date
+    Notes
+    -----
+    - Chlorophyll-a anomaly is computed as: target_chl_a - window_chl_a.
+    - Anomaly range is fixed at [-1, 1] mg/m³ for consistent visualization.
+    - Granule outlines are traced clockwise (top → right → bottom → left).
+    - Outlines crossing the dateline are split into segments for proper rendering on PlateCarree projection.
+    - Output filename includes the target date stamp extracted from the L3 dataset.
+
+    Raises
+    ------
+    IndexError
+        If a BGC file is not found in a path tuple (error is printed and granule is skipped).
+    AttributeError
+        If l3_ds_target lacks a 'product_name' attribute (date extraction will fail).
+
+    Example
+    -------
+    >>> plot_L2_granule_outlines(
+    ...     l3_ds_target, l3_ds_window, l2_data_paths_filt,
+    ...     save_path='./figures/20250916/png/',
+    ...     show_fig=False, figsave=True, dpi=150
+    ... )
+
+    See Also
+    --------
+    plot_granule_outline : Plot individual granule outlines on separate Orthographic maps.
+    plot_L3_anomaly_on_L2_granules : Plot L3 anomaly restricted to L2 granule extents.
+    """
+    # Status message
+    print(f"Generating world map of identified L2 granules...")
+
+    # Compute chlorophyll-a anomaly
+    chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
+    
+    # Extract date string from L3 dataset product name (format: YYYYMMDD)
+    try:
+        date_str = l3_ds_target.product_name.split('.')[1]
+    except (AttributeError, IndexError):
+        date_str = "unknown_date"
+        print(f"Warning: Could not extract date from product_name. Using '{date_str}'.")
+
+    # ========== SET UP GLOBAL MAP ==========
     fig, ax = plt.subplots(figsize=(10, 6), subplot_kw={'projection': ccrs.PlateCarree()})
     ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
     ax.coastlines()
@@ -1911,7 +2135,8 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window,l2_data_paths_filt, save
     ax.add_feature(cfeature.OCEAN, facecolor='white')
     ax.set_extent([-180, 180, -90, 90], crs=ccrs.PlateCarree())
 
-    plot = chl_anomaly.plot(
+    # ========== PLOT BACKGROUND: CHL-A ANOMALY ==========
+    chl_anomaly.plot(
         x="lon",
         y="lat",
         ax=ax,
@@ -1921,91 +2146,171 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window,l2_data_paths_filt, save
         add_colorbar=False,
         vmin=-1,
         vmax=1,
-        transform=ccrs.PlateCarree())
-    
+        transform=ccrs.PlateCarree()
+    )
+
+    # ========== OVERLAY L2 GRANULE OUTLINES ==========
     for i, path in enumerate(l2_data_paths_filt):
         try:
-            sref_idx = [j for j, p in enumerate(path) if 'SFREFL' in str(p)][0]
+            # Find the index of the BGC file in the path tuple
+            bgc_idx = [j for j, p in enumerate(path) if 'BGC' in str(p)][0]
         except IndexError:
-            print(f"Could not find SFREFL in path tuple: {path}")
+            print(f"Could not find BGC in path tuple: {path}")
             continue
 
-        # Open the SFREFL file and extract coordinates
-        dt = xr.open_datatree(path[sref_idx], decode_timedelta=True)
+        # Open the BGC file and extract coordinates
+        dt = xr.open_datatree(path[bgc_idx], decode_timedelta=True)
         ds = xr.merge(dt.to_dict().values())
         ds = ds.set_coords(("longitude", "latitude"))
 
+        # Extract coordinate arrays
         lons = ds['longitude'].values
         lats = ds['latitude'].values
 
-        # Draw granule outline (clockwise)
+        # Trace the granule outline clockwise: top → right → bottom → left → top
         edge_lon = np.concatenate([lons[0, :], lons[1:, -1], lons[-1, ::-1], lons[-2::-1, 0]])
         edge_lat = np.concatenate([lats[0, :], lats[1:, -1], lats[-1, ::-1], lats[-2::-1, 0]])
 
-        # Convert longitudes to [-180, 180] for PlateCarree
+        # Convert longitudes to [-180, 180] convention for PlateCarree projection
         edge_lon = ((edge_lon + 180) % 360) - 180
-        # Split outline at dateline crossing
+
+        # Handle dateline crossing: split outline at longitude jumps >180°
         jump = np.abs(np.diff(edge_lon))
         split_idx = np.where(jump > 180)[0] + 1
         edge_lon_plot = np.split(edge_lon, split_idx) if split_idx.size > 0 else [edge_lon]
         edge_lat_plot = np.split(edge_lat, split_idx) if split_idx.size > 0 else [edge_lat]
+
+        # Plot each outline segment
         for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
             ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
 
-    # Add date string to title
+    # ========== FINALIZE AND SAVE/SHOW ==========
     ax.set_title(date_str)
 
-        # Save or show figures
     if figsave:
         os.makedirs(save_path, exist_ok=True)
-        fig.savefig(os.path.join(save_path, f'L2_Grans_All_{date_str}.png'), dpi=100, bbox_inches='tight')
+        output_file = os.path.join(save_path, f'L2_Grans_All_{date_str}.png')
+        fig.savefig(output_file, dpi=dpi, bbox_inches='tight')
+        print(f"Figure saved to: {output_file}")
+
     if show_fig:
         plt.show()
-    # Close all figures to free memory
+
     plt.close(fig)
 
-def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, granule_bbox_pixel_counts, show_fig=True, figsave=False):
-    # Status of SST plotting
+def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, granule_bbox_pixel_counts, show_fig=True, figsave=False, dpi=100):
+    """
+    Plot and optionally save SST and SST anomaly overlays on L2 granule extents with identified chl-a anomaly bounding boxes.
+
+    This function retrieves GHRSST Level 4 SST data for a specified time span, then for each L2 granule,
+    creates two maps: one showing absolute sea surface temperature (SST) and another showing SST anomalies from climatology data.
+    Both maps include the L2 granule outline, associated L3 chl-a anomaly bounding boxes, and map context (land, ocean, coastlines).
+    The function handles dateline crossing and restricts data to the spatial extent of each granule for efficiency.
+
+    Parameters
+    ----------
+    l2_data_paths : list of tuple paths
+        List of tuples, each containing file paths for a granule 
+        (e.g.,  
+        [('data/PACE_OCI.20250916T011442.L2.SFREFL.V3_1.NRT.nc', 'data/PACE_OCI.20250916T011442.L2.OC_BGC.V3_1.NRT.nc', 'data/PACE_OCI.20250916T011442.L2.OC_AOP.V3_1.NRT.nc'), 
+        ('data/PACE_OCI.20250916T024802.L2.SFREFL.V3_1.NRT.nc', 'data/PACE_OCI.20250916T024802.L2.OC_BGC.V3_1.NRT.nc', 'data/PACE_OCI.20250916T024802.L2.OC_AOP.V3_1.NRT.nc')]
+        ).
+        The BGC file (typically at index 1) is used to extract coordinate information.
+    datapath : str
+        Local directory to save downloaded SST data files.
+    savepath : str
+        Directory to save generated figure PNG files. Subdirectories are created per granule date/time.
+    tspan : tuple of str
+        Time span for SST data search, e.g., ('2025-09-15', '2025-09-16'). Time components (HH:MM:SS)
+        are automatically added as noon UTC.
+    l3_bboxes : list of tuple
+        List of bounding boxes (min_lon, min_lat, max_lon, max_lat) for overlay on plots.
+    granule_bbox_pixel_counts : dict
+        Dictionary mapping each granule path to a dict of {bbox_idx: valid_pixel_count}.
+        Used to filter and highlight bounding boxes with sufficient valid data.
+    show_fig : bool, optional
+        If True, display figures interactively (default: True).
+    figsave : bool, optional
+        If True, save figures to disk in PNG format (default: False).
+    dpi : int, optional
+        Resolution of saved figures in dots per inch (default: 100).
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    - Data source: GHRSST Level 4 (MUR25-JPL-L4-GLOB-v04.2) at 0.25° resolution.
+    - SST values are converted from Kelvin to Celsius.
+    - SST anomaly range is fixed at -3 to +3°C for consistent visualization across granules.
+    - The Orthographic projection is centered on each granule's mean longitude/latitude.
+    - Granule outlines are split at dateline crossings (jumps >180°) for proper rendering.
+    - Output filenames include granule date/time stamps extracted from the file path.
+
+    Raises
+    ------
+    IndexError
+        If the BGC file is not found in the path tuple (prints error and continues to next granule).
+
+    Example
+    -------
+    >>> plot_save_SST_overlay(l2_data_paths_filt, './data/20250916/SST/', './figures/20250916/png/',
+    ...                       ('2025-09-16', '2025-09-16'), l3_bboxes, granule_bbox_pixel_counts,
+    ...                       show_fig=False, figsave=True, dpi=300)
+
+    References
+    ----------
+    - PODAAC GHRSST dataset: https://podaac.jpl.nasa.gov/dataset/MUR-JPL-L4-GLOB-v4.1
+    """
+    # Status message and dataset information
     print(f"Generating {len(l2_data_paths)} SST and SST anomaly plots of identified L2 granules "
         "using 0.25 deg GHRSST Level 4 (MUR25-JPL-L4-GLOB-v04.2) dataset. "
         "For more information please see: "
         "https://podaac.jpl.nasa.gov/dataset/MUR-JPL-L4-GLOB-v4.1..."
     )
 
-    #short_name = "MUR-JPL-L4-GLOB-v4.1"
+    # Download and open GHRSST SST data
     short_name = "MUR25-JPL-L4-GLOB-v04.2"
 
-    # Add HH:MM:SS (set to noon) to temporal span
-    tspan = (f"{tspan[0]} 12:00:00", f"{tspan[1]} 12:00:00")
+    # Add HH:MM:SS (set to noon UTC) to temporal span for earthaccess query
+    tspan_with_time = (f"{tspan[0]} 12:00:00", f"{tspan[1]} 12:00:00")
 
+    # Search and download SST data
     results = earthaccess.search_data(
         short_name=short_name,
-        temporal=tspan,
+        temporal=tspan_with_time,
     )
 
     sst_file_path = earthaccess.download(results, local_path=datapath)
+    
+    # Open and merge SST dataset
     sst_dt = xr.open_datatree(sst_file_path[0], decode_timedelta=True)
     sst_ds = xr.merge(sst_dt.to_dict().values())
 
-    
+    # Loop over each L2 granule
     for i, path in enumerate(l2_data_paths):
         try:
+            # Extract index of BGC file (used for coordinates)
             BGC_idx = [j for j, p in enumerate(path) if 'BGC' in str(p)][0]
         except IndexError:
             print(f"Could not find BGC in path tuple: {path}")
+            continue
 
-        # Open the BGC file and extract coordinates
+        # Open and merge BGC dataset to extract granule coordinates
         dt = xr.open_datatree(path[BGC_idx], decode_timedelta=True)
         ds = xr.merge(dt.to_dict().values())
         ds = ds.set_coords(("longitude", "latitude"))
 
-        # Determine longitude/latitude extent, handling dateline crossing
+        # Extract coordinate arrays
         lons = ds['longitude'].values
         lats = ds['latitude'].values
         min_lon = np.nanmin(lons)
         max_lon = np.nanmax(lons)
         min_lat = np.nanmin(lats)
         max_lat = np.nanmax(lats)
+        
+        # Handle dateline crossing by converting to 0-360 range
         if max_lon - min_lon > 180:
             lon_360 = lons % 360
             lon_ex_min = np.nanmin(lon_360)
@@ -2014,126 +2319,182 @@ def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, g
             lon_ex_min = min_lon
             lon_ex_max = max_lon
 
-        # Compute average map center
+        # Compute map center for Orthographic projection
         meanlon = float(np.nanmean(ds['longitude'].values))
         meanlat = float(np.nanmean(ds['latitude'].values))
 
-        # Set up figure and axis for SST
+        # ========== PLOT 1: ABSOLUTE SST ==========
         fig, ax = plt.subplots(
             figsize=(10, 8),
             subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
         )
-        #Add map features for context
-        ax.add_feature(cfeature.LAND, facecolor='lightgray',zorder=1)
+        
+        # Add map context features
+        ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=1)
         ax.add_feature(cfeature.OCEAN, facecolor='white')
         ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
         ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
         ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
 
-        # Draw granule outline (clockwise)
+        # Draw granule outline (clockwise from top-left, around edges, back to start)
         edge_lon = np.concatenate([lons[0, :], lons[1:, -1], lons[-1, ::-1], lons[-2::-1, 0]])
         edge_lat = np.concatenate([lats[0, :], lats[1:, -1], lats[-1, ::-1], lats[-2::-1, 0]])
 
-        # Convert longitudes to [-180, 180] for PlateCarree
+        # Convert longitudes to [-180, 180] convention for PlateCarree projection
         edge_lon = ((edge_lon + 180) % 360) - 180
-        # Split outline at dateline crossing
+        
+        # Split outline at dateline crossings (longitude jumps >180°) for proper visualization
         jump = np.abs(np.diff(edge_lon))
         split_idx = np.where(jump > 180)[0] + 1
         edge_lon_plot = np.split(edge_lon, split_idx) if split_idx.size > 0 else [edge_lon]
         edge_lat_plot = np.split(edge_lat, split_idx) if split_idx.size > 0 else [edge_lat]
+        
+        # Plot each segment of the granule outline
         for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
             ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
 
-        # Restrict dataarray to L2 granule extent for efficiency
-        dataarray = sst_ds['analysed_sst'].squeeze('time') - 273.15  # Convert from Kelvin to Celsius and squeeze time dimension
-        dataarray = dataarray.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
+        # Restrict SST data to granule extent for efficiency
+        dataarray_sst = sst_ds['analysed_sst'].squeeze('time') - 273.15  # Convert K to °C
+        dataarray_sst = dataarray_sst.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
 
-        plot = ax.pcolormesh(
-            dataarray["lon"],
-            dataarray["lat"],
-            dataarray,
+        # Plot SST as pcolormesh overlay
+        plot_sst = ax.pcolormesh(
+            dataarray_sst["lon"],
+            dataarray_sst["lat"],
+            dataarray_sst,
             cmap=cmocean.cm.thermal,
             shading="auto",
             transform=ccrs.PlateCarree(),
-            vmin = 0,
-            vmax = 20,
-            zorder=0  # Set zorder here directly
+            zorder=0
         )
 
         # Add colorbar
-        cbar = plt.colorbar(plot, ax=ax, orientation='horizontal', pad=0.05)
-        cbar.set_label('SST [\u00b0C]')
+        cbar_sst = plt.colorbar(plot_sst, ax=ax, orientation='horizontal', pad=0.05)
+        cbar_sst.set_label('SST [°C]')
 
-        # Overlay bounding boxes for this granule
+        # Overlay L3 bounding boxes
         add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
 
+        # Save or display SST figure
         if figsave:
-            # Extract date_time from filename, fallback to index if not found
             basename = os.path.basename(path[0])
             parts = basename.split('.')
             date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
             out_dir = os.path.join(savepath, date_time)
             os.makedirs(out_dir, exist_ok=True)
-            fname =  f'{date_time}_GHRSSTL4_SST_L2gran_bboxes.png'
-            plt.savefig(os.path.join(out_dir, fname), dpi=300, bbox_inches='tight')
-            if show_fig:
-                plt.show()
-        else:
-            if show_fig:
-                plt.show()
+            fname = f'{date_time}_GHRSSTL4_SST_L2gran_bboxes.png'
+            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
+            print(f"Figure saved to: {os.path.join(out_dir, fname)}")
+
+        if show_fig:
+            plt.show()
         plt.close()
 
-        # Set up figure and axis for SST Anomaly
+        # ========== PLOT 2: SST ANOMALY ==========
         fig, ax = plt.subplots(
             figsize=(10, 8),
             subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
         )
-        #Add map features for context
-        ax.add_feature(cfeature.LAND, facecolor='lightgray',zorder=1)
+        
+        # Add map context features
+        ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=1)
         ax.add_feature(cfeature.OCEAN, facecolor='white')
         ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
         ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
         ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
 
-        # Draw granule outline (clockwise)
+        # Draw granule outline (same as above)
         for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
             ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
 
-        # Restrict dataarray to L2 granule extent for efficiency
-        dataarray = sst_ds['sst_anomaly'].squeeze('time')
-        dataarray = dataarray.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
+        # Extract and restrict SST anomaly data to granule extent
+        dataarray_anom = sst_ds['sst_anomaly'].squeeze('time')
+        dataarray_anom = dataarray_anom.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
 
-        plot = ax.pcolormesh(
-            dataarray["lon"],
-            dataarray["lat"],
-            dataarray,
+        # Plot SST anomaly with symmetric colorbar (balance colormap)
+        plot_anom = ax.pcolormesh(
+            dataarray_anom["lon"],
+            dataarray_anom["lat"],
+            dataarray_anom,
             cmap=cmocean.cm.balance,
             shading="auto",
             transform=ccrs.PlateCarree(),
             vmin=-3,
             vmax=3,
-            zorder=0  # Set zorder here directly
+            zorder=0
         )
 
         # Add colorbar
-        cbar = plt.colorbar(plot, ax=ax, orientation='horizontal', pad=0.05)
-        cbar.set_label(dataarray.name + ' [\u00b0C]')
+        cbar_anom = plt.colorbar(plot_anom, ax=ax, orientation='horizontal', pad=0.05)
+        cbar_anom.set_label('SST Anomaly [°C]')
 
-        # Overlay bounding boxes for this granule
+        # Overlay L3 bounding boxes
         add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
 
+        # Save or display SST anomaly figure
         if figsave:
-            # Extract date_time from filename, fallback to index if not found
             basename = os.path.basename(path[0])
             parts = basename.split('.')
             date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
             out_dir = os.path.join(savepath, date_time)
             os.makedirs(out_dir, exist_ok=True)
-            fname =  f'{date_time}_GHRSSTL4_SST_Anomaly_L2gran_bboxes.png'
-            plt.savefig(os.path.join(out_dir, fname), dpi=300, bbox_inches='tight')
-            if show_fig:
-                plt.show()
-        else:
-            if show_fig:
-                plt.show()
+            fname = f'{date_time}_GHRSSTL4_SST_Anomaly_L2gran_bboxes.png'
+            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
+            print(f"Figure saved to: {os.path.join(out_dir, fname)}")
+
+        if show_fig:
+            plt.show()
         plt.close()
+
+
+def delete_downloaded_files(tspan, delete_flag=False):
+    """
+    Delete downloaded data files and subdirectories to free up space.
+
+    Parameters
+    ----------
+    tspan : tuple of str
+        Time span tuple, e.g., ('2025-10-30', '2025-10-30')
+    deleteflag : bool, optional
+        If True, delete subdirectories after logging (default: True)
+    """
+    date_str = tspan[0].replace('-', '')
+    data_path = f'./data/{date_str}'
+
+    # Discover all files in subdirectories
+    l3_files_downloaded = []
+    l2_files_downloaded = []
+    
+    if os.path.exists(data_path):
+        for root, dirs, files in os.walk(data_path):
+            for file in files:
+                if file.endswith('.nc'):
+                    # Classify files by directory name
+                    if 'L3' in root:
+                        l3_files_downloaded.append(file)
+                    elif 'L2' in root:
+                        l2_files_downloaded.append(file)
+
+    # Create log file summarizing downloaded files
+    log_filepath = os.path.join(data_path, 'downloaded_files_log.txt')
+    with open(log_filepath, 'w') as log_file:
+        log_file.write("Downloaded L3 Files:\n")
+        for fname in l3_files_downloaded:
+            log_file.write(f"{fname}\n")
+        log_file.write(f"\nTotal L3 files: {len(l3_files_downloaded)}\n")
+        log_file.write("\nDownloaded L2 Files:\n")
+        for fname in l2_files_downloaded:
+            log_file.write(f"{fname}\n")
+        log_file.write(f"\nTotal L2 files: {len(l2_files_downloaded)}\n")
+    print(f"Log of downloaded files saved to: {log_filepath}")
+
+    # Delete downloaded data files and data directories to free up space
+    if delete_flag:
+        for item in os.listdir(data_path):
+            item_path = os.path.join(data_path, item)
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+                print(f"Deleted subdirectory: {item_path}")
+        print(f"Cleaned up subdirectories in: {data_path}")
+    else:
+        print(f"Downloaded data retained at: {data_path}")
