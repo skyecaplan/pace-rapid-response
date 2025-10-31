@@ -90,21 +90,40 @@ def fig_to_base64(input_source, factor=1, max_height=None, output_format='PNG', 
     base64_string = base64.b64encode(output_buffer.getvalue()).decode("utf-8")
     return base64_string
 
-def write_html_image_row(f, imgs, capts, sizes, fill_width=True, equal_height=False):
+# def write_html_image_row(f, imgs, capts, sizes, fill_width=True, equal_height=False):
 
+#     row_classes = ['row']
+#     if fill_width:
+#         row_classes.append('full-width')
+#     if equal_height:
+#         row_classes.append('equal-height-row')
+#     if len(imgs) == 1:  # Add single-image class for single images
+#         row_classes.append('single-image')
+    
+#     f.write(f"<div class='{' '.join(row_classes)}'>\n")
+
+#     for i in range(len(imgs)):
+#         f.write(f"<div class='img-container {sizes[i]}'>\n")
+#         f.write(f"<img src='data:image/png;base64,{imgs[i]}' alt='{capts[i]}' />\n")
+#         f.write(f"<div class='caption'>{capts[i]}</div>\n</div>\n")
+    
+#     f.write("</div>\n")
+
+def write_html_image_row(f, imgs, capts, sizes, fill_width=True, equal_height=False):
     row_classes = ['row']
     if fill_width:
         row_classes.append('full-width')
     if equal_height:
         row_classes.append('equal-height-row')
-    if len(imgs) == 1:  # Add single-image class for single images
+    if len(imgs) == 1:
         row_classes.append('single-image')
     
     f.write(f"<div class='{' '.join(row_classes)}'>\n")
 
     for i in range(len(imgs)):
         f.write(f"<div class='img-container {sizes[i]}'>\n")
-        f.write(f"<img src='data:image/png;base64,{imgs[i]}' alt='{capts[i]}' />\n")
+        # ADD onclick event to make image clickable
+        f.write(f"<img src='data:image/png;base64,{imgs[i]}' alt='{capts[i]}' onclick='openModal(this)' />\n")
         f.write(f"<div class='caption'>{capts[i]}</div>\n</div>\n")
     
     f.write("</div>\n")
@@ -124,7 +143,7 @@ def write_full_html(day, ofilepath):
         write_full_html(day, ofilepath)
     '''
 
-    granule_folders  = [item for item in os.listdir(day+'/png/') if os.path.isdir(os.path.join(day+'/png/', item))]
+    granule_folders  = [item for item in os.listdir('figures/'+day+'/png/') if os.path.isdir(os.path.join('figures/'+day+'/png/', item))]
     h1 = 'PACE OCI daily Chlorophyll-a Anomaly, '+day
     tab_title = day+'_chla_anom_oci'
     with open(ofilepath, "w") as f:
@@ -157,6 +176,15 @@ def write_full_html(day, ofilepath):
             #f.write(".row.full-width.single-image .img-container { flex: 1; }\n")
             f.write(".row.full-width.single-image .img-container img { width: 100%; height: auto; object-fit: fill; }\n")  # ADD THIS LINE
 
+            #CODE FOR ZOOm
+            # Add this to your existing f.write("<style>\n") section:
+            f.write(".img-container img { width: 100%; height: 300px; display: block; border-radius: 5px; object-fit: contain; cursor: pointer; transition: transform 0.2s; }\n")
+            f.write(".img-container img:hover { transform: scale(1.02); }\n")  # Slight hover effect
+            f.write(".modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); }\n")
+            f.write(".modal-content { margin: auto; display: block; width: 90%; max-width: 1200px; max-height: 90%; object-fit: contain; }\n")
+            f.write(".close { position: absolute; top: 15px; right: 35px; color: #f1f1f1; font-size: 40px; font-weight: bold; cursor: pointer; }\n")
+            f.write(".close:hover { color: #ccc; }\n")
+
 
             f.write(".caption { margin-top: 10px; font-weight: bold; text-align: center; }\n")
             f.write("</style>\n</head>\n<body>\n")
@@ -185,7 +213,7 @@ def write_full_html(day, ofilepath):
             # write_html_image_row(f, imgs, capts, sizes, fill_width=True, equal_height=False)# single-image row
 
 
-            imgs = [fig_to_base64(day+'/png/'+'L2_Grans_All_'+day+'.png') ]
+            imgs = [fig_to_base64('figures/'+day+'/png/'+'L2_Grans_All_'+day+'.png') ]
             capts = ['Chl_a anomalous granules '+day+' vs 30-day mean']
             sizes = ['large']
             write_html_image_row(f, imgs, capts, sizes, fill_width=True, equal_height=False)# single-image row
@@ -203,15 +231,16 @@ def write_full_html(day, ofilepath):
                 f.write("</h2>\n")
 
                 # Load all images
-                carbon_phyto_im = fig_to_base64(day+'/png/'+granule+'/'+granule+'_carbon_phyto_overlay.png', factor = granule_images_shrink_factor)
-                chlor_a_im = fig_to_base64(day+'/png/'+granule+'/'+granule+'_chlor_a_overlay.png', factor = granule_images_shrink_factor)
-                poc_im = fig_to_base64(day+'/png/'+granule+'/'+granule+'_poc_overlay.png', factor = granule_images_shrink_factor)
-                avw_im = fig_to_base64(day+'/png/'+granule+'/'+granule+'_avw_overlay.png', factor = granule_images_shrink_factor)
-                nflh_im = fig_to_base64(day+'/png/'+granule+'/'+granule+'_nflh_overlay.png', factor = granule_images_shrink_factor)
-                outline_im = fig_to_base64(day+'/png/'+granule+'/'+granule+'_outline.png', factor = granule_images_shrink_factor)
-                anom_img = fig_to_base64(day+'/png/'+granule+'/'+granule+'_L3_Chl_Anomaly_L2gran_bboxes.png', factor = granule_images_shrink_factor)
-                tc_im = fig_to_base64(day+'/png/'+granule+'/'+granule+'_TC.png', factor = granule_images_shrink_factor)
-
+                carbon_phyto_im = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_carbon_phyto_overlay.png', factor = granule_images_shrink_factor)
+                chlor_a_im = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_chlor_a_overlay.png', factor = granule_images_shrink_factor)
+                poc_im = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_poc_overlay.png', factor = granule_images_shrink_factor)
+                avw_im = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_avw_overlay.png', factor = granule_images_shrink_factor)
+                nflh_im = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_nflh_overlay.png', factor = granule_images_shrink_factor)
+                outline_im = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_outline.png', factor = granule_images_shrink_factor)
+                anom_img = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_L3_Chl_Anomaly_L2gran_bboxes.png', factor = granule_images_shrink_factor)
+                tc_im = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_TC.png', factor = granule_images_shrink_factor)
+                sst_anom_im = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_GHRSSTL4_SST_Anomaly_L2gran_bboxes.png', factor = granule_images_shrink_factor)
+                sst_im = fig_to_base64('figures/'+day+'/png/'+granule+'/'+granule+'_GHRSSTL4_SST_L2gran_bboxes.png', factor = granule_images_shrink_factor)
 
                 # First row - always visible
                 imgs = [outline_im, chlor_a_im, anom_img, avw_im]
@@ -230,7 +259,11 @@ def write_full_html(day, ofilepath):
                 capts = ['True Color', 'NFLH', 'Phyto Carbon', 'POC']
                 sizes = ['large', 'large', 'large', 'large']
                 write_html_image_row(f, imgs, capts, sizes)
-                #write_html_image_row(f, imgs, capts, sizes)# if you want a second or third row of images behind the show more button, do it here
+                imgs = [ sst_im, sst_anom_im]
+                capts = ['SST', 'SST Anomaly']
+                sizes = ['large', 'large']
+
+                write_html_image_row(f, imgs, capts, sizes)# if you want a second or third row of images behind the show more button, do it here
                 f.write('</div>\n')
                 
                 # Add some spacing between granules
@@ -257,6 +290,39 @@ def write_full_html(day, ofilepath):
 
             f.write(f"<br>\n")
             f.write(f"<div>Granule download note: recent L2 granules need to use the NRT (near-real time) download link, older ones need to use the refined link. If one link isnt working, try the other. If both links aren't working, there was probably a data version update; you can manually correct the end of the filename to the correct version to fix the download link, i.e. at the end of the file, .L2.OC_BGC.V3_1.NRT.nc the V3_1 is changed to reflect the newest version</div>\n")
+            # Add this before f.write("</body>\n</html>\n")
+            f.write("""
+            <!-- Modal for image zoom -->
+            <div id="imageModal" class="modal" onclick="closeModal()">
+                <span class="close" onclick="closeModal()">&times;</span>
+                <img class="modal-content" id="modalImg">
+                <div id="modalCaption" style="text-align: center; color: white; padding: 20px; font-size: 18px;"></div>
+            </div>
+
+            <script>
+            function openModal(img) {
+                var modal = document.getElementById("imageModal");
+                var modalImg = document.getElementById("modalImg");
+                var caption = document.getElementById("modalCaption");
+                
+                modal.style.display = "block";
+                modalImg.src = img.src;
+                caption.innerHTML = img.alt;
+            }
+
+            function closeModal() {
+                document.getElementById("imageModal").style.display = "none";
+            }
+
+            // Close modal when pressing Escape key
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') {
+                    closeModal();
+                }
+            });
+            </script>
+            """)
+            
             f.write("</body>\n</html>\n")
 
 
