@@ -168,8 +168,6 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     
     # Convert date format and setup directories
     tspan = (yyyymmdd_to_iso(date_str), yyyymmdd_to_iso(date_str))
-    print(tspan)
-    print(delete_flag)
     data_path, l2_path, l3_path, sst_path, plot_path, html_path = setup_data(tspan)
     
     # Download L3 data for 30 days prior to target date
@@ -449,7 +447,7 @@ def download_l3_all_chl(tspan, data_path, days_prior=30, short_name='PACE_OCI_L3
         # Extract date from the most recent file (format: YYYYMMDD)
         latest_file = filelist_l3[-1]
         # Match pattern like "20250916" in filename
-        match = re.search(r'\.(\d{8})\.', latest_file)
+        match = re.search(r'\.(\d{8})\.', str(latest_file))
         if match:
             file_date = match.group(1)
             file_date_str = f"{file_date[:4]}-{file_date[4:6]}-{file_date[6:8]}"
@@ -1791,7 +1789,7 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False,
         ax.add_feature(cfeature.LAND, facecolor='lightgray')
         ax.add_feature(cfeature.OCEAN, facecolor='lightblue')
         ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
-        ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
+        ax.gridlines(draw_labels=False)
 
         # Extract longitude and latitude arrays
         lons = ds['longitude'].values
@@ -2270,181 +2268,187 @@ def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, g
         "https://podaac.jpl.nasa.gov/dataset/MUR-JPL-L4-GLOB-v4.1..."
     )
 
-    # Download and open GHRSST SST data
-    short_name = "MUR25-JPL-L4-GLOB-v04.2"
+    # Try to download and open GHRSST SST data for the specified time span if server times out print error message that plots were unable to be generated and skipped.
+    try:
+        # Download and open GHRSST SST data
+        short_name = "MUR25-JPL-L4-GLOB-v04.2"
 
-    # Add HH:MM:SS (set to noon UTC) to temporal span for earthaccess query
-    tspan_with_time = (f"{tspan[0]} 12:00:00", f"{tspan[1]} 12:00:00")
+        # Add HH:MM:SS (set to noon UTC) to temporal span for earthaccess query
+        tspan_with_time = (f"{tspan[0]} 12:00:00", f"{tspan[1]} 12:00:00")
 
-    # Search and download SST data
-    results = earthaccess.search_data(
-        short_name=short_name,
-        temporal=tspan_with_time,
-    )
-
-    sst_file_path = earthaccess.download(results, local_path=datapath)
-    
-    # Open and merge SST dataset
-    sst_dt = xr.open_datatree(sst_file_path[0], decode_timedelta=True)
-    sst_ds = xr.merge(sst_dt.to_dict().values())
-
-    # Loop over each L2 granule
-    for i, path in enumerate(l2_data_paths):
-        try:
-            # Extract index of BGC file (used for coordinates)
-            BGC_idx = [j for j, p in enumerate(path) if 'BGC' in str(p)][0]
-        except IndexError:
-            print(f"Could not find BGC in path tuple: {path}")
-            continue
-
-        # Open and merge BGC dataset to extract granule coordinates
-        dt = xr.open_datatree(path[BGC_idx], decode_timedelta=True)
-        ds = xr.merge(dt.to_dict().values())
-        ds = ds.set_coords(("longitude", "latitude"))
-
-        # Extract coordinate arrays
-        lons = ds['longitude'].values
-        lats = ds['latitude'].values
-        min_lon = np.nanmin(lons)
-        max_lon = np.nanmax(lons)
-        min_lat = np.nanmin(lats)
-        max_lat = np.nanmax(lats)
-        
-        # Handle dateline crossing by converting to 0-360 range
-        if max_lon - min_lon > 180:
-            lon_360 = lons % 360
-            lon_ex_min = np.nanmin(lon_360)
-            lon_ex_max = np.nanmax(lon_360)
-        else:
-            lon_ex_min = min_lon
-            lon_ex_max = max_lon
-
-        # Compute map center for Orthographic projection
-        meanlon = float(np.nanmean(ds['longitude'].values))
-        meanlat = float(np.nanmean(ds['latitude'].values))
-
-        # ========== PLOT 1: ABSOLUTE SST ==========
-        fig, ax = plt.subplots(
-            figsize=(10, 8),
-            subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
-        )
-        
-        # Add map context features
-        ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=1)
-        ax.add_feature(cfeature.OCEAN, facecolor='white')
-        ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
-        ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
-        ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
-
-        # Draw granule outline (clockwise from top-left, around edges, back to start)
-        edge_lon = np.concatenate([lons[0, :], lons[1:, -1], lons[-1, ::-1], lons[-2::-1, 0]])
-        edge_lat = np.concatenate([lats[0, :], lats[1:, -1], lats[-1, ::-1], lats[-2::-1, 0]])
-
-        # Convert longitudes to [-180, 180] convention for PlateCarree projection
-        edge_lon = ((edge_lon + 180) % 360) - 180
-        
-        # Split outline at dateline crossings (longitude jumps >180°) for proper visualization
-        jump = np.abs(np.diff(edge_lon))
-        split_idx = np.where(jump > 180)[0] + 1
-        edge_lon_plot = np.split(edge_lon, split_idx) if split_idx.size > 0 else [edge_lon]
-        edge_lat_plot = np.split(edge_lat, split_idx) if split_idx.size > 0 else [edge_lat]
-        
-        # Plot each segment of the granule outline
-        for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
-            ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
-
-        # Restrict SST data to granule extent for efficiency
-        dataarray_sst = sst_ds['analysed_sst'].squeeze('time') - 273.15  # Convert K to °C
-        dataarray_sst = dataarray_sst.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
-
-        # Plot SST as pcolormesh overlay
-        plot_sst = ax.pcolormesh(
-            dataarray_sst["lon"],
-            dataarray_sst["lat"],
-            dataarray_sst,
-            cmap=cmocean.cm.thermal,
-            shading="auto",
-            transform=ccrs.PlateCarree(),
-            zorder=0
+        # Search and download SST data
+        results = earthaccess.search_data(
+            short_name=short_name,
+            temporal=tspan_with_time,
         )
 
-        # Add colorbar
-        cbar_sst = plt.colorbar(plot_sst, ax=ax, orientation='horizontal', pad=0.05)
-        cbar_sst.set_label('SST [°C]')
-
-        # Overlay L3 bounding boxes
-        add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
-
-        # Save or display SST figure
-        if figsave:
-            basename = os.path.basename(path[0])
-            parts = basename.split('.')
-            date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
-            out_dir = os.path.join(savepath, date_time)
-            os.makedirs(out_dir, exist_ok=True)
-            fname = f'{date_time}_GHRSSTL4_SST_L2gran_bboxes.png'
-            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
-            print(f"Figure saved to: {os.path.join(out_dir, fname)}")
-
-        if show_fig:
-            plt.show()
-        plt.close()
-
-        # ========== PLOT 2: SST ANOMALY ==========
-        fig, ax = plt.subplots(
-            figsize=(10, 8),
-            subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
-        )
+        sst_file_path = earthaccess.download(results, local_path=datapath)
         
-        # Add map context features
-        ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=1)
-        ax.add_feature(cfeature.OCEAN, facecolor='white')
-        ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
-        ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
-        ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
+        # Open and merge SST dataset
+        sst_dt = xr.open_datatree(sst_file_path[0], decode_timedelta=True)
+        sst_ds = xr.merge(sst_dt.to_dict().values())
 
-        # Draw granule outline (same as above)
-        for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
-            ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
+        # Loop over each L2 granule
+        for i, path in enumerate(l2_data_paths):
+            try:
+                # Extract index of BGC file (used for coordinates)
+                BGC_idx = [j for j, p in enumerate(path) if 'BGC' in str(p)][0]
+            except IndexError:
+                print(f"Could not find BGC in path tuple: {path}")
+                continue
 
-        # Extract and restrict SST anomaly data to granule extent
-        dataarray_anom = sst_ds['sst_anomaly'].squeeze('time')
-        dataarray_anom = dataarray_anom.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
+            # Open and merge BGC dataset to extract granule coordinates
+            dt = xr.open_datatree(path[BGC_idx], decode_timedelta=True)
+            ds = xr.merge(dt.to_dict().values())
+            ds = ds.set_coords(("longitude", "latitude"))
 
-        # Plot SST anomaly with symmetric colorbar (balance colormap)
-        plot_anom = ax.pcolormesh(
-            dataarray_anom["lon"],
-            dataarray_anom["lat"],
-            dataarray_anom,
-            cmap=cmocean.cm.balance,
-            shading="auto",
-            transform=ccrs.PlateCarree(),
-            vmin=-3,
-            vmax=3,
-            zorder=0
-        )
+            # Extract coordinate arrays
+            lons = ds['longitude'].values
+            lats = ds['latitude'].values
+            min_lon = np.nanmin(lons)
+            max_lon = np.nanmax(lons)
+            min_lat = np.nanmin(lats)
+            max_lat = np.nanmax(lats)
+            
+            # Handle dateline crossing by converting to 0-360 range
+            if max_lon - min_lon > 180:
+                lon_360 = lons % 360
+                lon_ex_min = np.nanmin(lon_360)
+                lon_ex_max = np.nanmax(lon_360)
+            else:
+                lon_ex_min = min_lon
+                lon_ex_max = max_lon
 
-        # Add colorbar
-        cbar_anom = plt.colorbar(plot_anom, ax=ax, orientation='horizontal', pad=0.05)
-        cbar_anom.set_label('SST Anomaly [°C]')
+            # Compute map center for Orthographic projection
+            meanlon = float(np.nanmean(ds['longitude'].values))
+            meanlat = float(np.nanmean(ds['latitude'].values))
 
-        # Overlay L3 bounding boxes
-        add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
+            # ========== PLOT 1: ABSOLUTE SST ==========
+            fig, ax = plt.subplots(
+                figsize=(10, 8),
+                subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
+            )
+            
+            # Add map context features
+            ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=1)
+            ax.add_feature(cfeature.OCEAN, facecolor='white')
+            ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
+            ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
+            ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
 
-        # Save or display SST anomaly figure
-        if figsave:
-            basename = os.path.basename(path[0])
-            parts = basename.split('.')
-            date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
-            out_dir = os.path.join(savepath, date_time)
-            os.makedirs(out_dir, exist_ok=True)
-            fname = f'{date_time}_GHRSSTL4_SST_Anomaly_L2gran_bboxes.png'
-            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
-            print(f"Figure saved to: {os.path.join(out_dir, fname)}")
+            # Draw granule outline (clockwise from top-left, around edges, back to start)
+            edge_lon = np.concatenate([lons[0, :], lons[1:, -1], lons[-1, ::-1], lons[-2::-1, 0]])
+            edge_lat = np.concatenate([lats[0, :], lats[1:, -1], lats[-1, ::-1], lats[-2::-1, 0]])
 
-        if show_fig:
-            plt.show()
-        plt.close()
+            # Convert longitudes to [-180, 180] convention for PlateCarree projection
+            edge_lon = ((edge_lon + 180) % 360) - 180
+            
+            # Split outline at dateline crossings (longitude jumps >180°) for proper visualization
+            jump = np.abs(np.diff(edge_lon))
+            split_idx = np.where(jump > 180)[0] + 1
+            edge_lon_plot = np.split(edge_lon, split_idx) if split_idx.size > 0 else [edge_lon]
+            edge_lat_plot = np.split(edge_lat, split_idx) if split_idx.size > 0 else [edge_lat]
+            
+            # Plot each segment of the granule outline
+            for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
+                ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
+
+            # Restrict SST data to granule extent for efficiency
+            dataarray_sst = sst_ds['analysed_sst'].squeeze('time') - 273.15  # Convert K to °C
+            dataarray_sst = dataarray_sst.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
+
+            # Plot SST as pcolormesh overlay
+            plot_sst = ax.pcolormesh(
+                dataarray_sst["lon"],
+                dataarray_sst["lat"],
+                dataarray_sst,
+                cmap=cmocean.cm.thermal,
+                shading="auto",
+                transform=ccrs.PlateCarree(),
+                zorder=0
+            )
+
+            # Add colorbar
+            cbar_sst = plt.colorbar(plot_sst, ax=ax, orientation='horizontal', pad=0.05)
+            cbar_sst.set_label('SST [°C]')
+
+            # Overlay L3 bounding boxes
+            add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
+
+            # Save or display SST figure
+            if figsave:
+                basename = os.path.basename(path[0])
+                parts = basename.split('.')
+                date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
+                out_dir = os.path.join(savepath, date_time)
+                os.makedirs(out_dir, exist_ok=True)
+                fname = f'{date_time}_GHRSSTL4_SST_L2gran_bboxes.png'
+                plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
+                print(f"Figure saved to: {os.path.join(out_dir, fname)}")
+
+            if show_fig:
+                plt.show()
+            plt.close()
+
+            # ========== PLOT 2: SST ANOMALY ==========
+            fig, ax = plt.subplots(
+                figsize=(10, 8),
+                subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
+            )
+            
+            # Add map context features
+            ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=1)
+            ax.add_feature(cfeature.OCEAN, facecolor='white')
+            ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
+            ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
+            ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
+
+            # Draw granule outline (same as above)
+            for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
+                ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
+
+            # Extract and restrict SST anomaly data to granule extent
+            dataarray_anom = sst_ds['sst_anomaly'].squeeze('time')
+            dataarray_anom = dataarray_anom.sel(lon=slice(min_lon, max_lon), lat=slice(min_lat, max_lat))
+
+            # Plot SST anomaly with symmetric colorbar (balance colormap)
+            plot_anom = ax.pcolormesh(
+                dataarray_anom["lon"],
+                dataarray_anom["lat"],
+                dataarray_anom,
+                cmap=cmocean.cm.balance,
+                shading="auto",
+                transform=ccrs.PlateCarree(),
+                vmin=-3,
+                vmax=3,
+                zorder=0
+            )
+
+            # Add colorbar
+            cbar_anom = plt.colorbar(plot_anom, ax=ax, orientation='horizontal', pad=0.05)
+            cbar_anom.set_label('SST Anomaly [°C]')
+
+            # Overlay L3 bounding boxes
+            add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
+
+            # Save or display SST anomaly figure
+            if figsave:
+                basename = os.path.basename(path[0])
+                parts = basename.split('.')
+                date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
+                out_dir = os.path.join(savepath, date_time)
+                os.makedirs(out_dir, exist_ok=True)
+                fname = f'{date_time}_GHRSSTL4_SST_Anomaly_L2gran_bboxes.png'
+                plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
+                print(f"Figure saved to: {os.path.join(out_dir, fname)}")
+
+            if show_fig:
+                plt.show()
+            plt.close()
+
+    except Exception as e:
+        print(f"GHRSST download/open failed ({type(e).__name__}): {e}. SST plots skipped.")
+        return   
 
 
 def delete_downloaded_files(tspan, delete_flag=False):
