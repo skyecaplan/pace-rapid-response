@@ -2,6 +2,14 @@
 
 A repository for code relating to PACE rapid response effort. Events covered in this repo along with the relevant notebooks are listed in the table below.
 
+## Automatic Anomaly Detection Dashboards:
+| Category | Parameters | Contacts | Data Access |
+|----------|-----------|---------|-------------|
+| Atmospheres | Aerosols and Dust | Meng Gao | [Aerosol Dashboard Link](https://oceancolor.gsfc.nasa.gov/fileshare/meng_gao/rapid_pace/) |
+| Oceans | Chlorophyll | Matthew Kehrli & Graham Trolley | [Chlorophyll Dashboard Link](https://oceancolor.gsfc.nasa.gov/fileshare/graham_trolley/chla_anomaly_rapid_response/) |
+
+## Rapid Response Notebooks:
+
 | Event | Notebook | Maturity |Use |POC | Reviewers |
 |------|--------|--------|-----|------|----|
 | **Rapid Response** ||
