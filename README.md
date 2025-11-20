@@ -1,6 +1,6 @@
-# pace-rapid-response
+# PACE Rapid Response
 
-A repository for code relating to PACE rapid response effort. Events covered in this repo along with the relevant notebooks are listed in the table below.
+A repository for code relating to PACE rapid response effort. Events covered in this repo along with the relevant notebooks and dashboards are listed in the table below.
 
 ## Automatic Anomaly Detection Dashboards:
 | Category | Parameters | Contacts | Data Access |
@@ -10,26 +10,30 @@ A repository for code relating to PACE rapid response effort. Events covered in 
 
 ## Rapid Response Notebooks:
 
-| Event | Notebook | Maturity |Use |POC | Reviewers |
-|------|--------|--------|-----|------|----|
-| **Rapid Response** ||
-| Volcanic Eruptions |                     ||| knobelsp | kiwiriver, Ivona, skyecaplan |
-| Dust Storms        |                     | ||kiwiriver | knobelsp, skyecaplan |
-| Biomass Burnings regional impact | land/dNBR_analysis.ipynb  ||| skyecaplan | kiwiriver |
-| Biomass Burning smoke transport | smoke/PACE_L3_smoke.ipynb  ||| knobelsp, karyal1 | kiwiriver |
-| Major Precipitaiton/Storms/Flooding |             ||| skyecaplan, Chamara? | Ivona, mdkehrli, grahamtrolley |
-| HABs (Cyano/ILW) | inland-waters/cyano_index.ipynb  ||| skyecaplan, Bridget,  | Antonio, Ivona, Carlos |
-| HABs (Ocean) |   ||| mdkehrli, grahamtrolley  | Antonio, Ivona, Carlos|
-| Drought |                                ||| skyecaplan | knoebelsp |
-| Hurricanes/Cyclones | PRR_OC/PRR_OC_workflow.ipynb ||Science Nugget| mdkehrli, grahamtrolley | Carlos, Chamara |
-| Antarctic Ice Shelf Collapse/Icebergs |  ||| cpoulinn? | | 
-| Sargassum |                              ||| Amir | Antonio|
-| **Seasonality, trend, unexpected discoveries** ||
-| Air Quality (Trace Gas) |                ||| Andy? | knobelsp, Meng |
-| Obvious Human Activity Changes|          ||| Andy? | knobelsp  |
-| Oceanographic Features |                 ||| mdkehrli | Antonio, Ivona|
-| Phytoplankon Blooms (long term) |        ||| mdkehrli | Ivona, Carlos, grahamtrolley|
-| Sediment Plumes |                        ||| mdkehrli, Amir | Antonio|
-| Vegetation Transitions |                 ||| skyecaplan | Fred, Ivona, kiwiriver|
-| Marine Heat Waves |                      ||| knobelsp, Ivona | Antonio, mdkehrli|
-| ENSO, NAO |                              ||| knobelsp, Carlos, Ivona | Antonio, mdkehrli|
+| Event | Category | Workflow | Contacts | Reviewers |
+|-------|----------|----------|----------|-----------|
+| Biomass Burning (regional)|Land|[dNBR_analysis.ipynb](https://github.com/skyecaplan/pace-rapid-response/blob/main/land/dNBR_analysis.ipynb)|skyecaplan | kiwiriver |
+| Biomass Burning (smoke)|Atmospheres|[PACE_L3_smoke.ipynb](https://github.com/skyecaplan/pace-rapid-response/blob/main/smoke/PACE_L3_smoke.ipynb)|knobelsp, karyal1 | kiwiriver |
+| Drought|Land    |                  |skyecaplan | knoebelsp |
+| Dust Storms|Atmospheres| [dust](https://github.com/skyecaplan/pace-rapid-response/tree/main/dust)  |kiwiriver | knobelsp, skyecaplan |
+| HABs |Oceans   |          | mdkehrli, grahamtrolley  | Antonio, Ivona, Carlos|
+| HABs |Inland Waters| [cyano_index.ipynb](https://github.com/skyecaplan/pace-rapid-response/blob/main/inland-waters/cyano_index.ipynb)  | skyecaplan, Bridget,  | Antonio, Ivona, Carlos |
+| Ice Shelf Collapse/Icebergs| Oceans|  |cpoulinn |       | 
+| Major Storm Impact | Oceans | [PRR_OC_workflow.ipynb](https://github.com/skyecaplan/pace-rapid-response/blob/main/PRR_OC/PRR_OC_workflow.ipynb) | mdkehrli, grahamtrolley | Carlos, Chamara |
+| Major Storms/Flooding | Land/Atmospheres |  | skyecaplan, Chamara? | Ivona, mdkehrli, grahamtrolley |
+| Sargassum | Oceans|               | Amir | Antonio|
+| Volcanic Eruptions |Atmospheres| | knobelsp | kiwiriver, Ivona, skyecaplan |
+
+## Seasonality, Trend, Unexpected Discovery Notebooks:
+| Event | Category | Workflow | Contacts | Reviewers |
+|-------|----------|----------|----------|-----------|
+| Air Quality (Trace Gas)|Atmospheres | | Andy? | knobelsp, Meng |
+| ENSO, NAO | Oceans/Atmospheres|| knobelsp, Carlos, Ivona | Antonio, mdkehrli|
+| Human Activity Changes|Atmospheres| | Andy? | knobelsp  |
+| Marine Heat Waves |Oceans| | knobelsp, Ivona | Antonio, mdkehrli|
+| Oceanographic Features |Oceans| | mdkehrli | Antonio, Ivona|
+| Phytoplankon Blooms | Oceans|      | mdkehrli | Ivona, Carlos, grahamtrolley|
+| Sediment Plumes |Oceans|| mdkehrli, Amir | Antonio|
+| Vegetation Transitions |Land| In Progress | skyecaplan | Fred, Ivona, kiwiriver|
+
+
