@@ -99,6 +99,7 @@ def mask_ds(ds, flag="CLDICE", mask_reverse=False):
 
 def reproject_3d(src, crs="epsg:4326"):
     """
+    Note: old fcn, use grid_data
     Project a L2 3d variable with a given CRS. Will take either a single xr object or 
         a filepath from earthaccess.
     Note: Only tested for SFREFL, but should work for Rrs as long as src = only the Rrs
@@ -132,6 +133,7 @@ def reproject_3d(src, crs="epsg:4326"):
 
 def grid_match_3d(src, crs, dst_shape=None, transform=None):
     """
+    Note: Old grid matching fcn, use grid_data
     Reproject an L2 to match an input shape and grid 
     Args:
         src - an xarray dataset or a path to a file
@@ -222,4 +224,56 @@ def make_rgb(ds, scale=0.01, vmin=0, vmax=1.1, gamma=1, contrast=1.1, brightness
                             "longitude":ds.longitude, 
                             "wavelength_3d":[645, 555, 368]})
     return rgb_ds
+
+
+def grid_data(src, resolution, dst_crs="epsg:4326", resampling=Resampling.nearest):
+    """
+    Reproject a L2 dataset to match an input grid. Makes sure 3D variables are
+        in (Z, Y, X) dimension order, and all variables have spatial dims/crs 
+        assigned.
+    Known issue: in the rasterio.warp.calculate_default_transform() step, some 
+        granules have had the wrong lat/lon attributes causing issues with the 
+        reprojection. if this happens, us np.min/max on the src lon/lat arrays 
+        instead of the src.attrs["geospatial_..."] calls. 
+    Args:
+        src - an xarray dataset or dataarray to reproject
+        resolution - resolution of the output grid, in dst_crs units
+        dst_crs - CRS of the output data
+        resampling - resampling method (see rasterio.enums)
+    Returns:
+        dst - projected xr dataset
+    """
+    if (len(list(src.dims)) == 3) and (list(src.dims)[0] != "wavelength_3d"):
+        src = src.transpose("wavelength_3d", ...)
+    src = src.rio.set_spatial_dims("pixels_per_line", "number_of_lines")
+    src = src.rio.write_crs("epsg:4326")
+
+    # Calculating the default affine transform
+    defaults = rasterio.warp.calculate_default_transform(
+        src.rio.crs,
+        dst_crs,
+        src.rio.width,
+        src.rio.height,
+        left=src.attrs["geospatial_lon_min"],  #np.min(src.longitude.data),
+        bottom=src.attrs["geospatial_lat_min"],#np.min(src.latitude.data),
+        right=src.attrs["geospatial_lon_max"], #np.max(src.longitude.data),
+        top=src.attrs["geospatial_lat_max"],   #np.max(src.latitude.data),
+    )
+    # Aligning that transform to our desired resolution
+    transform, width, height = rasterio.warp.aligned_target(*defaults, resolution)
     
+    dst = src.rio.reproject(
+        dst_crs=dst_crs,
+        shape=(height, width),
+        transform=transform,
+        src_geoloc_array=(
+            src["longitude"],
+            src["latitude"],
+        ),
+        nodata=np.nan,
+        resample=resampling,
+    )
+    dst["x"] = dst["x"].round(9)
+    dst["y"] = dst["y"].round(9)
+    
+    return dst.rename({"x":"longitude", "y":"latitude"})
