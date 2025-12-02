@@ -177,7 +177,8 @@ poetry.toml
 pyrightconfig.json
 
 # Local data storage
-PRR_OC/local_data
+PRR_OC/Hurricane_Analysis/Archive/local_data
+PRR_OC/Hurricane_Analysis/local
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 

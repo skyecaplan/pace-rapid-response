@@ -1,3 +1,3 @@
 # PACE Rapid Response - Ocean Color
 
-Directory for Ocean Color related PACE Rapid Response Code. Currently, analysis scripts for Hurricanes/cyclones are mature, and a dedicated script is avalable for each storm we've analyzed. Additionally, the bloom_detection directory includes the utilities used to build the automated chl-anomaly detection dashboard located at [Chlorophyll Dashboard Link](https://oceancolor.gsfc.nasa.gov/fileshare/graham_trolley/chla_anomaly_rapid_response/)
+Directory for Ocean Color related PACE Rapid Response Code. Currently, analysis scripts for hurricanes/cyclones are mature, and a dedicated script is avalable for each storm we've analyzed. Additionally, the bloom_detection directory includes the utilities used to build the automated chl-anomaly detection dashboard located at [Chlorophyll Dashboard Link](https://oceancolor.gsfc.nasa.gov/fileshare/graham_trolley/chla_anomaly_rapid_response/)
