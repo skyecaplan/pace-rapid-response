@@ -15,7 +15,8 @@ The most important files for end-users within the subdirectory are listed below.
 Main python script used to automatically chlorophyll-a anamolies to identify potential bloom conditions using PACE L3 data
 
 ## gt_html_utils.py
-Utility functions used to assemble figures produced from Bloom_Detection.py script into easy to interpret html files, which are then hosted on fileshare
+Utility functions used to assemble figures produced from Bloom_Detection.py script into interpretable .html files, which are hosted on fileshare
+
 ---
 
 # Hurricane_Analysis
