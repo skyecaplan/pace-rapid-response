@@ -190,3 +190,6 @@ PRR_OC/Hurricane_Analysis/local
 *.zip
 *.json
 
+#test data may be generated in the notebook folder, ensure only include the notebook
+./dust/pace-orca-baby/notebook/*
+!./dust/pace-orca-baby/notebook/*.ipynb

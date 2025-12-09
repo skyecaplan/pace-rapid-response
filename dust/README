@@ -1,0 +1,18 @@
+# PACE Toolkit: ORCA-Observation and Retrieval Characterization with AI
+
+### Main Features
+
+- **Automated Data Download**: Retrieve PACE HARP2, SPEXone L1C and L2 data for specified dates or via automated cron jobs
+- **Aerosol Event Detection**: Identify scenes meeting specific criteria (AOD range, spatial coverage) for aerosol event analysis
+- **L1 and L2 Visualization**: Generate comprehensive plots of aerosol properties from FastMAPOL or RemoTAP product suites
+- **AI Analysis**: Integrate aerosol data with ChatGSFC for interpretation of aerosol types, sources, transport patterns, and impacts (only for educational purpose, accuracy depends on data uncertainty and AI model capability)
+- **Web Publishing**: Create and host HTML reports on OEL Fileshare
+
+---
+### Related Projects
+
+This toolkit supports **PACE Rapid Response Efforts**:
+- **Main Repository**: [pace-rapid-response](https://github.com/skyecaplan/pace-rapid-response)
+- **Basic (baby) Version**: A simpler version of the ORCA tool for PACE data download, aerosol detection, and plotting is available in the [tools directory](https://github.com/skyecaplan/pace-rapid-response/tree/main/dust/pace-orca-baby)
+- **Full Version**: Updated version including all main features [ORCA repo](https://github.com/kiwiriver/pace-orca)
+
