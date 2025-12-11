@@ -179,6 +179,7 @@ pyrightconfig.json
 # Local data storage
 PRR_OC/Hurricane_Analysis/Archive/local_data
 PRR_OC/Hurricane_Analysis/local
+PRR_OC/Hurricane_Analysis/Completed/local
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
