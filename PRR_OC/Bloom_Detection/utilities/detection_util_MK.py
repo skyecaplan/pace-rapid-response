@@ -514,7 +514,7 @@ def l3_anomaly_bbox(target_dataset, window_dataset, block_size_lat=100, block_si
     for i in range(0, n_lat, block_size_lat):
         for j in range(0, n_lon, block_size_lon):
             block = chl_anomaly_np[i:i+block_size_lat, j:j+block_size_lon]
-            count_above = np.sum(np.abs(block) > anomaly_threshold)
+            count_above = np.sum(block > anomaly_threshold)
             if count_above > count_min:
                 min_lat = np.min(lat_vals[i:i+block_size_lat])
                 max_lat = np.max(lat_vals[i:i+block_size_lat])
