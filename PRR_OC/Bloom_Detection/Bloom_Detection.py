@@ -16,6 +16,5 @@ sys.path.append(util_path)
 from detection_util_MK import Bloom_Detection
 
 # %% Run Code
-Bloom_Detection('20251108', dpi=150, delete_flag=False)
+Bloom_Detection('20251117', dpi=150, delete_flag=False)
 
-# %%
