@@ -69,7 +69,7 @@ import earthaccess   # NASA Earthdata cloud and data access
 # Set default plotting parameters
 rcParams['font.size'] = '16' 
 
-def Bloom_Detection(date_str, dpi=100, delete_flag=False):
+def Bloom_Detection(date_str, anomaly_type='absolute', anomaly_threshold=1, days_prior=30, dpi=100, delete_flag=False):
     """
     Generate a complete phytoplankton bloom detection workflow for PACE OCI data.
 
@@ -86,6 +86,12 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     ----------
     date_str : str
         Target date in 'YYYYMMDD' format (e.g., '20250916').
+    anomaly_type : str, optional
+        Type of anomaly to calculate ('absolute' or 'relative', default: 'absolute').
+    anomaly_threshold : float, optional
+        Threshold for anomaly detection (default: 1).
+    days_prior : int, optional
+        Number of days for historical mean calculation (default: 30).
     dpi : int, optional
         Resolution of saved figures in dots per inch (default: 100).
     delete_flag : bool, optional
@@ -174,10 +180,10 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     data_path, l2_path, l3_path, sst_path, plot_path, html_path = setup_data(tspan)
     
     # Download L3 data for 30 days prior to target date
-    print(f"\nDownloading 30-day L3 chlorophyll-a dataset...")
+    print(f"\nDownloading {days_prior}-day L3 chlorophyll-a dataset...")
     filelist_l3_all = download_l3_all_chl(
         tspan, l3_path,
-        days_prior=30,
+        days_prior=days_prior,
         short_name='PACE_OCI_L3M_CHL',
         granule_name='*.DAY.*4km*'
     )
@@ -190,11 +196,17 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     l3_ds_window = xr.open_mfdataset(filelist_l3_all[0:-1], combine='nested', concat_dim='time')
 
     # Identify L3 bounding boxes with significant chlorophyll-a anomalies
-    l3_bboxes, l3_bboxes_0360 = l3_anomaly_bbox(l3_ds_target, l3_ds_window, anomaly_type='absolute', anomaly_threshold=1)
-    print(f"Identified {len(l3_bboxes)} anomaly bounding boxes (anomaly ≥ 1 mg/m³)")
-
+    l3_bboxes, l3_bboxes_0360 = l3_anomaly_bbox(l3_ds_target, l3_ds_window, anomaly_type=anomaly_type, anomaly_threshold=anomaly_threshold)
+    if anomaly_type == 'absolute':
+        print(f"Identified {len(l3_bboxes)} anomaly bounding boxes (anomaly ≥ {anomaly_threshold} mg/m³)")
+    elif anomaly_type == 'relative':
+        print(f"Identified {len(l3_bboxes)} anomaly bounding boxes (anomaly ≥ {anomaly_threshold}%)")
+    else:
+        raise ValueError("Invalid anomaly_type. Choose 'absolute' or 'relative'.")
+    
     # Generate L3 maps
-    L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path, anomaly_type='absolute', show_fig=False, figsave=True, dpi=dpi)
+    L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path,
+                      anomaly_type=anomaly_type, show_fig=False, figsave=True, dpi=dpi)
 
     # ========== STAGE 3: L2 GRANULE DISCOVERY & FILTERING ==========
     print("\n[Stage 3] Discovering and filtering L2 granules...")
@@ -217,7 +229,7 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     # Global map: L2 granule outlines on L3 anomaly
     plot_L2_granule_outlines(
         l3_ds_target, l3_ds_window, l2_data_paths_filt, plot_path,
-        anomaly_type='absolute', show_fig=False, figsave=True, dpi=dpi
+        anomaly_type=anomaly_type, show_fig=False, figsave=True, dpi=dpi
     )
     
     # Individual granule outlines on Orthographic projections
@@ -226,7 +238,7 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     # L3 anomaly restricted to L2 granule extents
     plot_L3_anomaly_on_L2_granules(
         l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts,
-        l2_data_paths_filt, plot_path, anomaly_type='absolute', show_fig=False, figsave=True, dpi=dpi
+        l2_data_paths_filt, plot_path, anomaly_type=anomaly_type, show_fig=False, figsave=True, dpi=dpi
     )
     
     # True Color RGB composites
@@ -405,7 +417,6 @@ def download_l3_all_chl(tspan, data_path, days_prior=30, short_name='PACE_OCI_L3
     filtered_nrt = []
     for r in resultsnrt:
         rday = extract_day(r)
-        print(rday)
         if rday is not None and rday in pref_dates:
             # same calendar day as a preferred result -> skip this NRT
             continue
@@ -631,20 +642,25 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, anomaly_ty
     except Exception:
         date_str = getattr(l3_ds_target, "product_name", "target")
     try:
-        ws = np.datetime_as_string(l3_ds_window['time'].values.min(), unit='D')
-        we = np.datetime_as_string(l3_ds_window['time'].values.max(), unit='D')
-        window_range = f"{ws} to {we}"
+        # ws = np.datetime_as_string(l3_ds_window['time'].values.min(), unit='D')
+        # we = np.datetime_as_string(l3_ds_window['time'].values.max(), unit='D')
+        # window_range = f"{ws} to {we}"
+        window_range = l3_ds_window['time'].values.max()+1
     except Exception:
-        window_range = "30-day window"
-    print(f"Plotting L3 maps for target: {date_str}  (window: {window_range})")
+        window_range = "Window Range Unknown"
+    print(f"Plotting L3 maps for target: {date_str}  (Window Range: {window_range} days)")
 
     # Calculate chlorophyll-a anomaly
     if anomaly_type == 'relative':
         chl_anomaly = (l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')) / l3_ds_window['chlor_a'].mean('time') * 100
         vmin, vmax = -100, 100
+        title_anomaly = f'Chlorophyll-a Relative Anomaly (%) ({date_str})'
+        c_label_anomaly = 'Chlorophyll-a Relative Anomaly [%]'
     elif anomaly_type == 'absolute':
         chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
         vmin, vmax = -1, 1
+        title_anomaly = f'Chlorophyll-a Absolute Anomaly (mg/m^3) ({date_str})'
+        c_label_anomaly = 'Chlorophyll-a Absolute Anomaly [mg/m^3]'
     else:
         raise ValueError("Invalid anomaly_type. Choose 'absolute' or 'relative'.")
 
@@ -663,10 +679,10 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, anomaly_ty
     ax1.add_feature(cfeature.LAND, facecolor='lightgray')
     ax1.add_feature(cfeature.OCEAN, facecolor='white')
 
-    # 2. 30-day mean
+    # 2. Window-Range-day mean
     fig2, ax2, plot2, cbar2 = L3_quickplot_dataarray_MK(
         l3_ds_window['chlor_a'].mean(dim='time'),
-        title='Chlorophyll-a 30-day Mean',
+        title=f'Chlorophyll-a {window_range}-day Mean',
         cmap=cmocean.cm.haline,
         clabel='Chlorophyll-a [mg/m^3]',
         vmin=0.01, vmax=5,
@@ -679,9 +695,9 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, anomaly_ty
     # 3. Anomaly (linear scale, can be negative)
     fig3, ax3, plot3, cbar3 = L3_quickplot_dataarray_MK(
         chl_anomaly,
-        title='Chlorophyll-a Anomaly (From 30-day Mean)',
+        title=title_anomaly,
         cmap=cmocean.cm.balance,
-        clabel='Chlorophyll-a [mg/m^3]',
+        clabel=c_label_anomaly,
         vmin=vmin, vmax=vmax,
         log_scale=False,
         output_path=None
@@ -712,10 +728,10 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, anomaly_ty
         )
         ax4.add_patch(rect)
 
-    # 5. 30-day mean with bounding boxes
+    # 5. Window-Range-day mean with bounding boxes
     fig5, ax5, plot5, cbar5 = L3_quickplot_dataarray_MK(
         l3_ds_window['chlor_a'].mean(dim='time'),
-        title='Chlorophyll-a 30-day Mean',
+        title=f'Chlorophyll-a {window_range}-day Mean',
         cmap=cmocean.cm.haline,
         clabel='Chlorophyll-a [mg/m^3]',
         vmin=0.01, vmax=5,
@@ -738,9 +754,9 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, anomaly_ty
     #6. Anomaly with bounding boxes 
     fig6, ax6, plot6, cbar6 = L3_quickplot_dataarray_MK(
         chl_anomaly,
-        title='Chlorophyll-a Anomaly (From 30-day Mean)',
+        title=title_anomaly,
         cmap=cmocean.cm.balance,
-        clabel='Chlorophyll-a [mg/m^3]',
+        clabel=c_label_anomaly,
         vmin=vmin, vmax=vmax,
         log_scale=False
     )    
@@ -763,14 +779,14 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, anomaly_ty
         os.makedirs(savepath, exist_ok=True)
         fig1.savefig(os.path.join(savepath, f'L3_Chl_{date_str}.png'), dpi=dpi, bbox_inches='tight')
         print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_{date_str}.png')}")
-        fig2.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}.png'), dpi=dpi, bbox_inches='tight')
-        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}.png')}")
+        fig2.savefig(os.path.join(savepath, f'L3_Chl_{window_range}dayMean_{date_str}.png'), dpi=dpi, bbox_inches='tight')
+        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_{window_range}dayMean_{date_str}.png')}")
         fig3.savefig(os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}.png'), dpi=dpi, bbox_inches='tight')
         print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}.png')}")
         fig4.savefig(os.path.join(savepath, f'L3_Chl_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
         print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_{date_str}_bboxes.png')}")
-        fig5.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
-        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}_bboxes.png')}")
+        fig5.savefig(os.path.join(savepath, f'L3_Chl_{window_range}dayMean_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
+        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_{window_range}dayMean_{date_str}_bboxes.png')}")
         fig6.savefig(os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
         print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}_bboxes.png')}")
     if show_fig:
