@@ -191,6 +191,9 @@ PRR_OC/local_data/
 *.zip
 *.json
 
+# HTML files in PRR_OC directory (MK)
+PRR_OC/**/*.html
+
 #test data may be generated in the notebook folder, ensure only include the notebook
 ./dust/pace-orca-baby/notebook/*
 !./dust/pace-orca-baby/notebook/*.ipynb
