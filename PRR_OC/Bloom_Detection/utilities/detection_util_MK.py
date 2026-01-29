@@ -46,6 +46,7 @@ from datetime import datetime, timedelta  # Date and time manipulation
 import numpy as np           # Numerical operations on arrays
 import xarray as xr          # Labeled multi-dimensional arrays (netCDF, etc.)
 import importlib             # Import utilities (for reloading modules)
+import pandas as pd         # Data analysis and manipulation
 from scipy.ndimage import label  # Image processing (connected component labeling)
 
 # --- Plotting and visualization ---
@@ -87,6 +88,8 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
         Target date in 'YYYYMMDD' format (e.g., '20250916').
     dpi : int, optional
         Resolution of saved figures in dots per inch (default: 100).
+    delete_flag : bool, optional
+        If True, downloaded data files will be deleted after processing (default: False).
 
     Returns
     -------
@@ -175,7 +178,7 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     filelist_l3_all = download_l3_all_chl(
         tspan, l3_path,
         days_prior=30,
-        short_name='PACE_OCI_L3M_CHL_NRT',
+        short_name='PACE_OCI_L3M_CHL',
         granule_name='*.DAY.*4km*'
     )
 
@@ -187,17 +190,17 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     l3_ds_window = xr.open_mfdataset(filelist_l3_all[0:-1], combine='nested', concat_dim='time')
 
     # Identify L3 bounding boxes with significant chlorophyll-a anomalies
-    l3_bboxes, l3_bboxes_0360 = l3_anomaly_bbox(l3_ds_target, l3_ds_window)
+    l3_bboxes, l3_bboxes_0360 = l3_anomaly_bbox(l3_ds_target, l3_ds_window, anomaly_type='absolute', anomaly_threshold=1)
     print(f"Identified {len(l3_bboxes)} anomaly bounding boxes (anomaly ≥ 1 mg/m³)")
 
     # Generate L3 maps
-    L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path, show_fig=False, figsave=True, dpi=dpi)
+    L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path, anomaly_type='absolute', show_fig=False, figsave=True, dpi=dpi)
 
     # ========== STAGE 3: L2 GRANULE DISCOVERY & FILTERING ==========
     print("\n[Stage 3] Discovering and filtering L2 granules...")
     
     # Search for L2 granules matching L3 bboxes
-    short_names = ['PACE_OCI_L2_SFREFL_NRT', 'PACE_OCI_L2_BGC_NRT', 'PACE_OCI_L2_AOP_NRT']
+    short_names = ['PACE_OCI_L2_SFREFL', 'PACE_OCI_L2_BGC', 'PACE_OCI_L2_AOP']
     final_results = l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=short_names, print_flag=False)
     print(f"Found {len(final_results)} matched L2 scenes across {len(short_names)} products")
 
@@ -214,7 +217,7 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     # Global map: L2 granule outlines on L3 anomaly
     plot_L2_granule_outlines(
         l3_ds_target, l3_ds_window, l2_data_paths_filt, plot_path,
-        show_fig=False, figsave=True, dpi=dpi
+        anomaly_type='absolute', show_fig=False, figsave=True, dpi=dpi
     )
     
     # Individual granule outlines on Orthographic projections
@@ -223,7 +226,7 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     # L3 anomaly restricted to L2 granule extents
     plot_L3_anomaly_on_L2_granules(
         l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts,
-        l2_data_paths_filt, plot_path, show_fig=False, figsave=True, dpi=dpi
+        l2_data_paths_filt, plot_path, anomaly_type='absolute', show_fig=False, figsave=True, dpi=dpi
     )
     
     # True Color RGB composites
@@ -275,58 +278,6 @@ def Bloom_Detection(date_str, dpi=100, delete_flag=False):
     print("BLOOM DETECTION PIPELINE COMPLETE")
     print(f"Output directory: {os.path.abspath(plot_path)}")
     print("=" * 80 + "\n")
-
-# def Bloom_Detection(date_str, dpi=100):
-#     # Define file paths, and download data    
-#     auth = earthaccess.login(persist=True) # Login to Earthdata using stored credentials
-#     tspan = (yyyymmdd_to_iso(date_str), yyyymmdd_to_iso(date_str)) #Convert date string to ISO format
-#     data_path, l2_path, l3_path, sst_path, plot_path, html_path = setup_data(tspan) # Setup data directories
-#     # Download L3 data for 30 days prior to target date
-#     filelist_l3_all = download_l3_all_chl(tspan, l3_path,
-#                                           days_prior=30,
-#                                           short_name='PACE_OCI_L3M_CHL_NRT',
-#                                           granule_name='*.DAY.*4km*'
-#                                         ) 
-
-
-#     # Calculate 30-day mean, compute Chlorophyll-a anomaly, and identify bounding boxes with anomaly >= 1mg/m^3
-#     l3_ds_target = xr.open_mfdataset(filelist_l3_all[-1], combine='nested', concat_dim='time') # open current day L3 data for anomaly calculation
-#     l3_ds_window = xr.open_mfdataset(filelist_l3_all[0:-1], combine='nested', concat_dim='time') # open previous day L3 data for anomaly calculation
-
-#     # Identify L3 Bounding Boxes with Chlorophyll-a Anomaly Greater Than 1 mg/m^3
-#     l3_bboxes, l3_bboxes_0360 = l3_anomaly_bbox(l3_ds_target, l3_ds_window)
-
-
-#     # Plot and save L3 daily, 30-day mean, and Chlorophyll-a anomaly
-#     L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path, show_fig=False, figsave=True, dpi=dpi)
-
-
-#     # Locate Unique L2 Granules Corresponding to L3 Chlorophyll-a Anomaly Bounding Boxes
-#     short_names = ['PACE_OCI_L2_SFREFL_NRT', 'PACE_OCI_L2_BGC_NRT', 'PACE_OCI_L2_AOP_NRT']
-#     final_results = l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=short_names, print_flag=False)
-
-
-#     # Download or Cloud Open L2 Data
-#     l2_data_paths = download_open_l2(final_results, data_path=l2_path)
-
-
-#     # Filter Data
-#     l2_data_paths_filt, granule_bbox_pixel_counts = filter_l2_by_valid(l2_data_paths, l3_bboxes_0360)
-
-
-#     # Generate and Save Plots
-#     plot_L2_granule_outlines(l3_ds_target, l3_ds_window,l2_data_paths_filt, plot_path, show_fig=False, figsave=True, dpi=dpi)
-#     plot_granule_outline(l2_data_paths_filt, plot_path, show_fig=False, figsave=True, dpi=dpi)
-#     plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts, l2_data_paths_filt, plot_path, show_fig=False, figsave=True, dpi=dpi)
-#     plot_save_TC_l2(l2_data_paths_filt, plot_path, l3_bboxes, granule_bbox_pixel_counts, show_fig=False, figsave=True, dpi=dpi)
-#     plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'chlor_a', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.algae, vmin=0.1, vmax=30, show_fig=False, figsave=True, dpi=dpi)
-#     plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'poc', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.turbid, vmin=10, vmax=10000, show_fig=False, figsave=True, dpi=dpi)
-#     plot_save_BGC_l2_overlay(l2_data_paths_filt, plot_path, 'carbon_phyto', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.speed, vmin=10, vmax=1000, show_fig=False, figsave=True, dpi=dpi)
-#     plot_save_AOP_l2_overlay(l2_data_paths_filt, plot_path, 'avw', l3_bboxes, granule_bbox_pixel_counts, vmin=400, vmax=700, log_scale=False, show_fig=False, figsave=True, dpi=dpi)
-#     plot_save_AOP_l2_overlay(l2_data_paths_filt, plot_path, 'nflh', l3_bboxes, granule_bbox_pixel_counts, cmap=cmocean.cm.thermal, vmin=0, vmax=1, log_scale=False, show_fig=False, figsave=True, dpi=dpi)
-
-#     # Generate and Save auxiliary plots (SST and SST Anomaly Overlays)
-#     plot_save_SST_overlay(l2_data_paths_filt, sst_path , plot_path, tspan, l3_bboxes, granule_bbox_pixel_counts, show_fig=False, figsave=True, dpi=dpi)
 
 
 def yyyymmdd_to_iso(date_str):
@@ -396,7 +347,8 @@ def setup_data(tspan):
 
     return data_path, l2_path, l3_path, sst_path, plot_path, html_path
 
-def download_l3_all_chl(tspan, data_path, days_prior=30, short_name='PACE_OCI_L3M_CHL_NRT', granule_name='*.DAY.*4km*'):
+
+def download_l3_all_chl(tspan, data_path, days_prior=30, short_name='PACE_OCI_L3M_CHL', granule_name='*.DAY.*4km*'):
     """
     Search for and download PACE L3 chlorophyll-a granule files for the previous 30 days using earthaccess.
 
@@ -412,7 +364,7 @@ def download_l3_all_chl(tspan, data_path, days_prior=30, short_name='PACE_OCI_L3
     data_path : str
         Local directory to save downloaded files.
     short_name : str, optional
-        Earthdata product short name (default: 'PACE_OCI_L3M_CHL_NRT').
+        Earthdata product short name (default: 'PACE_OCI_L3M_CHL').
     granule_name : str, optional
         Granule name pattern to match (default: '*.DAY.*4km*').
 
@@ -440,14 +392,36 @@ def download_l3_all_chl(tspan, data_path, days_prior=30, short_name='PACE_OCI_L3
         granule_name=granule_name
     )
 
-    filelist_l3 = earthaccess.download(results, local_path=data_path)
+    resultsnrt = earthaccess.search_data(
+        short_name=short_name+'_NRT',
+        temporal=tspan,
+        granule_name=granule_name
+    )
+
+    print(f"Found {len(results)} non-NRT files for {short_name} and {len(resultsnrt)} NRT files for {short_name}_NRT.")
+    pref_dates = set(d for d in (extract_day(r) for r in results) if d is not None)
+
+    # filter NRT: drop if the NRT day equals any preferred day (keep otherwise)
+    filtered_nrt = []
+    for r in resultsnrt:
+        rday = extract_day(r)
+        print(rday)
+        if rday is not None and rday in pref_dates:
+            # same calendar day as a preferred result -> skip this NRT
+            continue
+        filtered_nrt.append(r)
+
+    print(f"Filtered NRT: kept {len(filtered_nrt)} of {len(resultsnrt)} items after removing same-day duplicates")
+    results_final = list(results) + filtered_nrt
+
+    filelist_l3 = earthaccess.download(results_final, local_path=data_path)
 
     # Check if the most recent file matches tspan[-1]
     if filelist_l3:
         # Extract date from the most recent file (format: YYYYMMDD)
         latest_file = filelist_l3[-1]
         # Match pattern like "20250916" in filename
-        match = re.search(r'\.(\d{8})\.', str(latest_file))
+        match = re.search(r'\.(\d{8})\.', latest_file)
         if match:
             file_date = match.group(1)
             file_date_str = f"{file_date[:4]}-{file_date[4:6]}-{file_date[6:8]}"
@@ -462,7 +436,50 @@ def download_l3_all_chl(tspan, data_path, days_prior=30, short_name='PACE_OCI_L3
     
     return filelist_l3
 
-def l3_anomaly_bbox(target_dataset, window_dataset, block_size_lat=100, block_size_lon=100, anomaly_threshold=1, count_min=1000):
+
+def extract_day(result):
+    """
+    Parse calendar-day from the earthaccess/CMR granule structure.
+    - Prefer: result['umm']['TemporalExtent']['RangeDateTime']['BeginningDateTime']
+    - Fallback: use EndingDateTime if BeginningDateTime missing
+    Returns a pandas.Timestamp normalized to midnight, or None if not present/parseable.
+    """
+    try:
+        umm = result.get("umm") or {}
+        if isinstance(umm, dict):
+            te = umm.get("TemporalExtent") or {}
+            if isinstance(te, dict):
+                rng = te.get("RangeDateTime") or {}
+                if isinstance(rng, dict):
+                    # prefer beginning
+                    bd = rng.get("BeginningDateTime") or rng.get("Beginning") or None
+                    if bd:
+                        return pd.to_datetime(bd).normalize()
+                    ed = rng.get("EndingDateTime") or rng.get("Ending") or None
+                    if ed:
+                        return pd.to_datetime(ed).normalize()
+    except Exception:
+        pass
+
+    # also allow some providers returning nested keyed differently
+    try:
+        tc = result.get("Temporal coverage") or result.get("TemporalCoverage")
+        if isinstance(tc, dict):
+            rng = tc.get("RangeDateTime") or {}
+            if isinstance(rng, dict):
+                bd = rng.get("BeginningDateTime") or rng.get("Beginning")
+                if bd:
+                    return pd.to_datetime(bd).normalize()
+                ed = rng.get("EndingDateTime") or rng.get("Ending")
+                if ed:
+                    return pd.to_datetime(ed).normalize()
+    except Exception:
+        pass
+
+    return None
+
+
+def l3_anomaly_bbox(target_dataset, window_dataset, block_size_lat=100, block_size_lon=100, anomaly_threshold=1, anomaly_type='absolute', count_min=1000):
     """
     Identify bounding boxes of significant chlorophyll-a anomalies in L3 datasets.
 
@@ -483,6 +500,8 @@ def l3_anomaly_bbox(target_dataset, window_dataset, block_size_lat=100, block_si
         Block size in the longitude dimension (default is 100).
     anomaly_threshold : float, optional
         Minimum absolute anomaly value (mg/m^3) to consider significant (default is 1).
+    anomaly_type : str, optional
+        Type of anomaly to consider: 'absolute' or 'relative' (default is 'absolute').
     count_min : int, optional
         Minimum number of significant pixels in a block to identify bounding box (default is 1000).
 
@@ -503,7 +522,14 @@ def l3_anomaly_bbox(target_dataset, window_dataset, block_size_lat=100, block_si
     -------
     >>> bboxes, bboxes_0360 = l3_anomaly_bbox(target_ds, window_ds)
     """
-    chl_anomaly = target_dataset['chlor_a'].mean('time') - window_dataset['chlor_a'].mean('time')
+    if anomaly_type == 'relative':
+        chl_anomaly = (target_dataset['chlor_a'].mean('time') - window_dataset['chlor_a'].mean('time'))/window_dataset['chlor_a'].mean('time') * 100
+    elif anomaly_type == 'absolute':
+        chl_anomaly = target_dataset['chlor_a'].mean('time') - window_dataset['chlor_a'].mean('time')
+    else:
+        #Throw error for invalid anomaly_type
+        raise ValueError("Invalid anomaly_type. Choose 'absolute' or 'relative'.")
+
     chl_anomaly_np = np.squeeze(chl_anomaly.values)
 
     lat_vals = chl_anomaly['lat'].values
@@ -527,6 +553,7 @@ def l3_anomaly_bbox(target_dataset, window_dataset, block_size_lat=100, block_si
     bboxes_0360 = bbox_convert_long_0360(bboxes)
 
     return bboxes, bboxes_0360
+
 
 def bbox_convert_long_0360(bboxes):
     """
@@ -563,7 +590,8 @@ def bbox_convert_long_0360(bboxes):
 
     return bbox_0360
 
-def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=True, figsave=False, dpi=100):
+
+def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, anomaly_type='absolute', show_fig=True, figsave=False, dpi=100):
     """
     Plot and optionally save L3 daily, 30-day mean, and chlorophyll-a anomaly maps,
     with bounding boxes overlaid on the appropriate plots.
@@ -578,6 +606,8 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=T
         List of bounding boxes (min_lon, min_lat, max_lon, max_lat).
     savepath : str
         Directory to save figures.
+    anomaly_type : str, optional
+        Type of anomaly to plot: 'absolute' or 'relative' (default is 'absolute
     show_fig : bool
         If True, display the figures.
     figsave : bool
@@ -609,7 +639,15 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=T
     print(f"Plotting L3 maps for target: {date_str}  (window: {window_range})")
 
     # Calculate chlorophyll-a anomaly
-    chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
+    if anomaly_type == 'relative':
+        chl_anomaly = (l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')) / l3_ds_window['chlor_a'].mean('time') * 100
+        vmin, vmax = -100, 100
+    elif anomaly_type == 'absolute':
+        chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
+        vmin, vmax = -1, 1
+    else:
+        raise ValueError("Invalid anomaly_type. Choose 'absolute' or 'relative'.")
+
     date_str = l3_ds_target.product_name.split('.')[1]
 
     # 1. Daily chlorophyll-a
@@ -644,7 +682,7 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=T
         title='Chlorophyll-a Anomaly (From 30-day Mean)',
         cmap=cmocean.cm.balance,
         clabel='Chlorophyll-a [mg/m^3]',
-        vmin=-1, vmax=1,
+        vmin=vmin, vmax=vmax,
         log_scale=False,
         output_path=None
     )
@@ -703,7 +741,7 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=T
         title='Chlorophyll-a Anomaly (From 30-day Mean)',
         cmap=cmocean.cm.balance,
         clabel='Chlorophyll-a [mg/m^3]',
-        vmin=-1, vmax=1,
+        vmin=vmin, vmax=vmax,
         log_scale=False
     )    
     ax6.add_feature(cfeature.LAND, facecolor='lightgray')
@@ -724,11 +762,17 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=T
     if figsave:
         os.makedirs(savepath, exist_ok=True)
         fig1.savefig(os.path.join(savepath, f'L3_Chl_{date_str}.png'), dpi=dpi, bbox_inches='tight')
+        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_{date_str}.png')}")
         fig2.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}.png'), dpi=dpi, bbox_inches='tight')
+        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}.png')}")
         fig3.savefig(os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}.png'), dpi=dpi, bbox_inches='tight')
+        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}.png')}")
         fig4.savefig(os.path.join(savepath, f'L3_Chl_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
+        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_{date_str}_bboxes.png')}")
         fig5.savefig(os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
+        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_30dayMean_{date_str}_bboxes.png')}")
         fig6.savefig(os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}_bboxes.png'), dpi=dpi, bbox_inches='tight')
+        print(f"Figure saved to: {os.path.join(savepath, f'L3_Chl_Anomaly_{date_str}_bboxes.png')}")
     if show_fig:
         plt.show()
     # Close all figures to free memory
@@ -738,6 +782,7 @@ def L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, savepath, show_fig=T
     plt.close(fig4)
     plt.close(fig5)
     plt.close(fig6)
+
 
 def L3_quickplot_dataarray_MK(dataarray, title=None, cmap=cmocean.cm.haline, clabel=None, vmin=None, vmax=None, log_scale=True, output_path=None, dpi=100):
     """
@@ -819,10 +864,12 @@ def L3_quickplot_dataarray_MK(dataarray, title=None, cmap=cmocean.cm.haline, cla
 
     return fig, ax, plot, cbar
 
+
 def get_timestamp(result):
     native_id = result['meta']['native-id']
     match = re.search(r'(\d{8}T\d{6})', native_id)
     return match.group(1) if match else None
+
 
 def match_granules_by_native_id(results_list):
     """Match granules across product types using their native-id timestamp."""
@@ -850,7 +897,7 @@ def match_granules_by_native_id(results_list):
     
     return matched_granules
 
-def l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=['PACE_OCI_L2_SFREFL_NRT','PACE_OCI_L2_SFREFL_NRT'],print_flag=False):
+def l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=['PACE_OCI_L2_SFREFL','PACE_OCI_L2_SFREFL'],print_flag=False):
     """
     Search for unique L2 granules across all identified bounding boxes and product, and pair results by scene.
 
@@ -867,7 +914,7 @@ def l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=['PACE_OCI_L2_SFREFL_NRT
         Time span for the search, e.g., ("2025-09-15", "2025-09-15").
     short_names : list of str, optional
         List of Earthdata product short names to search for. Default is two SFREFL products.
-    print_summary : bool, optional
+    print_flag : bool, optional
         If True, print summary information about the search and results.
 
     Returns
@@ -897,9 +944,33 @@ def l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=['PACE_OCI_L2_SFREFL_NRT
                 bounding_box=bbox,
                 version="3.1"
             )
-            all_results_per_shortname[i].extend(results)
+
+            resultsnrt = earthaccess.search_data(
+                short_name=short_name+'_NRT',
+                temporal=tspan,
+                bounding_box=bbox,
+                version="3.1"
+            )
+
+            #print(f" Found {len(results)} non-NRT and {len(resultsnrt)} NRT granules for {short_name} in bbox {bbox}")
+            pref_dates = set(d for d in (extract_day(r) for r in results) if d is not None)
+
+            # filter NRT: drop if the NRT day equals any preferred day (keep otherwise)
+            filtered_nrt = []
+            for r in resultsnrt:
+                rday = extract_day(r)
+                #print(rday)
+                if rday is not None and rday in pref_dates:
+                    # same calendar day as a preferred result -> skip this NRT
+                    continue
+                filtered_nrt.append(r)
+
+            #print(f"Filtered NRT: kept {len(filtered_nrt)} of {len(resultsnrt)} items after removing same-day duplicates")
+            results_final = list(results) + filtered_nrt
+
+            all_results_per_shortname[i].extend(results_final)
             if print_flag:
-                print(f" Number of granules for {short_name} in bbox {bbox}: {len(results)}")
+                print(f" Number of granules for {short_name} in bbox {bbox}: {len(results_final)}")
 
     # Deduplicate by native-id for each product type
     unique_results_per_shortname = []
@@ -920,6 +991,7 @@ def l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=['PACE_OCI_L2_SFREFL_NRT
         print(f"Total matched granule sets: {len(final_results)}")
         
     return final_results
+
 
 def download_open_l2(results, data_path=None, cloud_flag=False):
     """
@@ -979,6 +1051,7 @@ def download_open_l2(results, data_path=None, cloud_flag=False):
     print('Files Downloaded: ' + str(sum(len(files) for files in file_lists)))
     return final_paths
 
+
 def filter_l2_by_valid(final_paths, l3_bboxes_0360):
     """
     Filter L2 granule paths by spatial overlap and valid pixel count with L3 bounding boxes.
@@ -1033,6 +1106,7 @@ def filter_l2_by_valid(final_paths, l3_bboxes_0360):
 
     return final_paths_filt, granule_bbox_pixel_counts
 
+
 def bboxes_in_granule(ds, l3_bboxes_0360):
     """
     Identify bounding boxes that overlap with the spatial extent of a dataset.
@@ -1068,6 +1142,7 @@ def bboxes_in_granule(ds, l3_bboxes_0360):
             max_lat > ds['latitude'].min().item() and min_lat < ds['latitude'].max().item()):
             overlapping_bbox_idx.append(j)
     return overlapping_bbox_idx
+
 
 def count_valid_pixels(ds, bbox_idx, l3_bboxes_0360, print_flag=False):
     """
@@ -1242,6 +1317,7 @@ def plot_save_BGC_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, gran
                 plt.show()
         plt.close()
 
+
 def plot_save_AOP_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, granule_bbox_pixel_counts, vmin=None, vmax=None, cmap=cmocean.cm.haline, log_scale=True, show_fig=True, figsave=False, dpi=100):
     """
     Plot and optionally save overlays of AOP L2 granules with bounding boxes.
@@ -1319,11 +1395,27 @@ def plot_setup(props):
     props : dict
         Dictionary containing map properties, typically from `map_props()`, with keys:
             'flag_crossdateline' : bool
-                Whether the longitude range crosses the dateline.
+                True if the longitude range crosses the dateline (difference > 180°).
             'lon_range' : float
-                Range of longitudes (degrees).
+                Range of longitudes (max - min).
             'lat_range' : float
-                Range of latitudes (degrees).
+                Range of latitudes (max - min).
+            'meanlon' : float
+                Mean longitude of the dataset.
+            'meanlat' : float
+                Mean latitude of the dataset.
+            'clon' : float
+                Central longitude for projection centering.
+            'clat' : float
+                Central latitude for projection centering.
+            'north_proj' : tuple
+                Projected coordinates of the northernmost point.
+            'south_proj' : tuple
+                Projected coordinates of the southernmost point.
+            'east_proj' : tuple
+                Projected coordinates of the easternmost point.
+            'west_proj' : tuple
+                Projected coordinates of the westernmost point.
 
     Returns
     -------
@@ -1337,15 +1429,12 @@ def plot_setup(props):
     >>> props = map_props("granule.nc")
     >>> fig, ax = plot_setup(props)
     """
-    if props["flag_crossdateline"]:
-        #fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={'projection': ccrs.PlateCarree(central_longitude=180)})
-        #fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={'projection': ccrs.Orthographic(central_longitude=180)})
-        fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={'projection': ccrs.Orthographic(central_latitude=props["meanlat"], central_longitude=props["meanlon"])})
-    else:
-        #fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={'projection': ccrs.PlateCarree()})
-        #fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={'projection': ccrs.NorthPolarStereo()})
-        fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={'projection': ccrs.Orthographic(central_latitude=props["meanlat"], central_longitude=props["meanlon"])})
 
+    # Set up the figure and axis with Orthographic projection using map properties generated by map_props()
+    fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={'projection': ccrs.Orthographic(central_latitude=props["clat"], central_longitude=props["clon"])})
+    # Set the axis limits directly using projected coordinates
+    ax.set_xlim([props["west_proj"][0], props["east_proj"][0]])
+    ax.set_ylim([props["south_proj"][1], props["north_proj"][1]])
 
     # Add map features for context
     ax.add_feature(cfeature.LAND, facecolor='lightgray')
@@ -1353,6 +1442,7 @@ def plot_setup(props):
     ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
     ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
     return fig, ax
+
 
 def map_props(path):
     """
@@ -1377,6 +1467,22 @@ def map_props(path):
                 Range of longitudes (max - min).
             'lat_range' : float
                 Range of latitudes (max - min).
+            'meanlon' : float
+                Mean longitude of the dataset.
+            'meanlat' : float
+                Mean latitude of the dataset.
+            'clon' : float
+                Central longitude for projection centering.
+            'clat' : float
+                Central latitude for projection centering.
+            'north_proj' : tuple
+                Projected coordinates of the northernmost point.
+            'south_proj' : tuple
+                Projected coordinates of the southernmost point.
+            'east_proj' : tuple
+                Projected coordinates of the easternmost point.
+            'west_proj' : tuple
+                Projected coordinates of the westernmost point.
 
     Example
     -------
@@ -1387,14 +1493,41 @@ def map_props(path):
     ds = ds.set_coords(("longitude", "latitude"))  # Set longitude and latitude as coordinates
 
     # Convert longitude and latitude to 0-360 and 0-180 for range calculation
-    lons = ds['longitude'].values % 360
-    lats = ds['latitude'].values % 180
+    # lons = ds['longitude'].values % 360
+    # lats = ds['latitude'].values % 180
+
+    # Determine if longitudes cross the dateline
+    flag_crossdateline = (ds['longitude'].max() - ds['longitude'].min()) > 180
+
+    lons = ds['longitude'].values
+    lats = ds['latitude'].values
 
     lonrange = float(np.nanmax(lons) - np.nanmin(lons))
     latrange = float(np.nanmax(lats) - np.nanmin(lats))
 
-    # Determine if longitudes cross the dateline
-    flag_crossdateline = (ds['longitude'].max() - ds['longitude'].min()) > 180
+    # Find corner points of the granule using lat/lon arrays with dateline handling
+    if flag_crossdateline:
+        north_point = (lats[-1,-1], lons[-1,-1]%360)
+        south_point = (lats[0,0], lons[0,0]%360)
+        east_point = (lats[0,-1], lons[0,-1]%360)
+        west_point = (lats[-1,0], lons[-1,0]%360)
+    elif not flag_crossdateline:
+        north_point = (lats[-1,-1], lons[-1,-1])
+        south_point = (lats[0,0], lons[0,0])
+        east_point = (lats[0,-1], lons[0,-1])
+        west_point = (lats[-1,0], lons[-1,0])
+
+    # Compute central latitude and longitude for projection centering
+    clon = (north_point[1] + south_point[1]) / 2
+    clat = (east_point[0] + west_point[0]) / 2
+
+    proj = ccrs.Orthographic(central_longitude=clon, central_latitude=clat)
+
+    # Transform corner points to projected coordinates
+    north_proj = proj.transform_point(north_point[1], north_point[0], ccrs.PlateCarree())
+    south_proj = proj.transform_point(south_point[1], south_point[0], ccrs.PlateCarree())
+    east_proj = proj.transform_point(east_point[1], east_point[0], ccrs.PlateCarree())
+    west_proj = proj.transform_point(west_point[1], west_point[0], ccrs.PlateCarree())
 
     # Store outputs in a dictionary
     props = {
@@ -1402,10 +1535,17 @@ def map_props(path):
         "lon_range": lonrange,
         "lat_range": latrange,
         "meanlon": float(np.nanmean(ds['longitude'].values)),
-        "meanlat": float(np.nanmean(ds['latitude'].values))
+        "meanlat": float(np.nanmean(ds['latitude'].values)),
+        "clon": float(clon),
+        "clat": float(clat),
+        "north_proj": north_proj,
+        "south_proj": south_proj,
+        "east_proj": east_proj,
+        "west_proj": west_proj
     }
 
     return props
+
 
 def plot_rgb_from_path(path, ax, savefig=False, plot_path=None, dpi=100):
     """
@@ -1525,6 +1665,7 @@ def enhance(rgb, scale = 0.01, vmin = 0.01, vmax = 1.04, gamma=0.95, contrast=1.
 
     return rgb
 
+
 def plot_var_from_path(path, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vmax=None, log_scale=True, output_path=None, dpi=100):
     """
     Plot a variable from an xarray.Dataset on a Cartopy axis with colorbar.
@@ -1608,6 +1749,7 @@ def plot_var_from_path(path, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vma
 
     return mesh, cbar
 
+
 def add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts):
     """
     Add bounding boxes to the plot for the given granule path.
@@ -1675,7 +1817,7 @@ def add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts):
             # )
             # print(f"Plotted bbox {bbox_idx} with {numpixels} valid pixels.")
 
-# functions to make wavelength-accurate avw colormap, no need to change
+
 def wavelength_to_rgb(wavelength):
     """
     Convert a wavelength in the range 380-750 nm to an RGB color.
@@ -1718,6 +1860,7 @@ def wavelength_to_rgb(wavelength):
 
     return (R, G, B)
 
+
 def generate_colormap(min_wavelength=380, max_wavelength=750, num_colors=256):
     """
     Generates a colormap for wavelengths between `min_wavelength` and `max_wavelength`.
@@ -1735,6 +1878,7 @@ def generate_colormap(min_wavelength=380, max_wavelength=750, num_colors=256):
     # Create a LinearSegmentedColormap using the RGB colors
     cmap_ = LinearSegmentedColormap.from_list("wavelength_cmap", colors, num_colors)
     return cmap_
+
 
 def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False, dpi=100):
     """
@@ -1767,7 +1911,7 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False,
     """
     for i, path in enumerate(l2_data_paths):
         try:
-            sref_idx = [j for j, p in enumerate(path) if 'SFREFL' in str(p)][0]
+            sref_idx = [j for j, p in enumerate(path) if 'BGC' in str(p)][0]
         except IndexError:
             print(f"Could not find SFREFL in path tuple: {path}")
             continue
@@ -1777,23 +1921,51 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False,
         ds = xr.merge(dt.to_dict().values())
         ds = ds.set_coords(("longitude", "latitude"))
 
-        # Compute mean longitude/latitude for map centering
-        meanlon = float(np.mean(ds['longitude'].values))
-        meanlat = float(np.mean(ds['latitude'].values))
+        # Extract coordinate arrays
+        lons = ds['longitude'].values
+        lats = ds['latitude'].values
+
+        # Determine if granule crosses dateline
+        flag_crossdateline = (ds['longitude'].max() - ds['longitude'].min()) > 180
+
+        # Find corner points of the granule using lat/lon arrays with dateline handling
+        if flag_crossdateline:
+            north_point = (lats[-1,-1], lons[-1,-1]%360)
+            south_point = (lats[0,0], lons[0,0]%360)
+            east_point = (lats[0,-1], lons[0,-1]%360)
+            west_point = (lats[-1,0], lons[-1,0]%360)
+        elif not flag_crossdateline:
+            north_point = (lats[-1,-1], lons[-1,-1])
+            south_point = (lats[0,0], lons[0,0])
+            east_point = (lats[0,-1], lons[0,-1])
+            west_point = (lats[-1,0], lons[-1,0])
+
+        # Compute central latitude and longitude for projection centering
+        clat = (north_point[0] + south_point[0]) / 2
+        clon = (east_point[1] + west_point[1]) / 2
 
         fig, ax = plt.subplots(
             figsize=(10, 8),
-            subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
+            subplot_kw={'projection': ccrs.Orthographic(central_longitude=clon, central_latitude=clat)}
         )
 
+        proj = ccrs.Orthographic(central_longitude=clon, central_latitude=clat)
+
+        # Transform corner points to projected coordinates
+        north_proj = proj.transform_point(north_point[1], north_point[0], ccrs.PlateCarree())
+        south_proj = proj.transform_point(south_point[1], south_point[0], ccrs.PlateCarree())
+        east_proj = proj.transform_point(east_point[1], east_point[0], ccrs.PlateCarree())
+        west_proj = proj.transform_point(west_point[1], west_point[0], ccrs.PlateCarree())
+        
+        # Set the axis limits directly using projected coordinates
+        ax.set_xlim([west_proj[0], east_proj[0]])
+        ax.set_ylim([south_proj[1], north_proj[1]])
+
+        # Add map features for context
         ax.add_feature(cfeature.LAND, facecolor='lightgray')
         ax.add_feature(cfeature.OCEAN, facecolor='lightblue')
         ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
         ax.gridlines(draw_labels=False)
-
-        # Extract longitude and latitude arrays
-        lons = ds['longitude'].values
-        lats = ds['latitude'].values
 
         # Trace the outline of the granule (clockwise)
         edge_lon = lons[0, :]
@@ -1826,7 +1998,7 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False,
         match = re.search(r'\.(\d{8}T\d{6})\.', ds.product_name)
         if match:
             date_time = match.group(1)
-            top_lon = np.mean(lons)
+            top_lon = np.mean(clon)
             top_lat = np.max(lats)
             ax.text(
                 top_lon, top_lat + 1, date_time,
@@ -1839,7 +2011,6 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False,
             )
 
         ax.set_global()
-
         # Save or show figure
         if figsave:
             basename = os.path.basename(path[0])
@@ -1857,7 +2028,7 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False,
         plt.close()
 
 
-def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts, l2_data_paths, savepath, show_fig=True, figsave=False, dpi=100):
+def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granule_bbox_pixel_counts, l2_data_paths, savepath, anomaly_type='absolute', show_fig=True, figsave=False, dpi=100):
     """
     Plot and optionally save L3 chlorophyll-a anomaly overlays on L2 granule extents, with bounding boxes.
 
@@ -1875,6 +2046,8 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
         List of L2 data path tuples.
     savepath : str
         Directory to save figures.
+    anomaly_type : str, optional
+        Type of anomaly to compute ('absolute' or 'relative', default: 'absolute').
     show_fig : bool, optional
         If True, display the figures (default: True).
     figsave : bool, optional
@@ -1886,11 +2059,17 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
     -------
     None
     """
-    # Status of chl-a anomaly per granule plotting
-    print(f"Generating chlorophyll-a anomaly plots of identified L2 granules...")
-
     # Compute chlorophyll-a anomaly
-    chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
+    if anomaly_type == 'relative':
+        print(f"Generating relative chlorophyll-a anomaly plots of identified L2 granules...") # Status of chl-a anomaly per granule plotting
+        chl_anomaly = (l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')) / l3_ds_window['chlor_a'].mean('time') * 100
+        vmin, vmax = -100, 100
+        clabel = 'Relative Chlorophyll-a Anomaly [%]'
+    elif anomaly_type == 'absolute':
+        print(f"Generating absolute chlorophyll-a anomaly plots of identified L2 granules...") # Status of chl-a anomaly per granule plotting
+        chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
+        vmin, vmax = -1, 1
+        clabel = 'Absolute Chlorophyll-a Anomaly [mg/m^3]'
     date_str = l3_ds_target.product_name.split('.')[1]
 
     # Loop over L2 granules to plot anomaly overlays
@@ -1911,8 +2090,8 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
             chl_anomaly,
             ds,
             cmap=cmocean.cm.balance,
-            clabel='Chlorophyll-a Anomaly [mg/m^3]',
-            vmin=-1, vmax=1,
+            clabel=clabel,
+            vmin=vmin, vmax=vmax,
             log_scale=False
         )
         
@@ -1930,7 +2109,10 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
             date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
             out_dir = os.path.join(savepath, date_time)
             os.makedirs(out_dir, exist_ok=True)
-            fname =  f'{date_time}_L3_Chl_Anomaly_L2gran_bboxes.png'
+            if anomaly_type == 'relative':
+                fname =  f'{date_time}_L3_Chl_Relative_Anomaly_L2gran_bboxes.png'
+            else:
+                fname =  f'{date_time}_L3_Chl_Absolute_Anomaly_L2gran_bboxes.png'
             plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
             print(f"Figure saved to: {os.path.join(out_dir, fname)}")
             if show_fig:
@@ -1983,22 +2165,47 @@ def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmoce
     max_lon = np.nanmax(lons)
     min_lat = np.nanmin(lats)
     max_lat = np.nanmax(lats)
-    if max_lon - min_lon > 180:
-        lon_360 = lons % 360
-        lon_ex_min = np.nanmin(lon_360)
-        lon_ex_max = np.nanmax(lon_360)
-    else:
-        lon_ex_min = min_lon
-        lon_ex_max = max_lon
 
-    # Set up figure and axis
+    # Determine if granule crosses dateline
+    flag_crossdateline = (l2_dataset['longitude'].max() - l2_dataset['longitude'].min()) > 180
+
+    # Find corner points of the granule using lat/lon arrays with dateline handling
+    if flag_crossdateline:
+        north_point = (lats[-1,-1], lons[-1,-1]%360)
+        south_point = (lats[0,0], lons[0,0]%360)
+        east_point = (lats[0,-1], lons[0,-1]%360)
+        west_point = (lats[-1,0], lons[-1,0]%360)
+    elif not flag_crossdateline:
+        north_point = (lats[-1,-1], lons[-1,-1])
+        south_point = (lats[0,0], lons[0,0])
+        east_point = (lats[0,-1], lons[0,-1])
+        west_point = (lats[-1,0], lons[-1,0])
+
+    # Compute central latitude and longitude for projection centering
+    clat = (north_point[0] + south_point[0]) / 2
+    clon = (east_point[1] + west_point[1]) / 2
+
+    # Set up figure and axis with Orthographic projection centered on granule
     fig, ax = plt.subplots(
         figsize=(10, 8),
-        subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
+        subplot_kw={'projection': ccrs.Orthographic(central_longitude=clon, central_latitude=clat)}
     )
+
+    proj = ccrs.Orthographic(central_longitude=clon, central_latitude=clat)
+
+    # Transform corner points to projected coordinates
+    north_proj = proj.transform_point(north_point[1], north_point[0], ccrs.PlateCarree())
+    south_proj = proj.transform_point(south_point[1], south_point[0], ccrs.PlateCarree())
+    east_proj = proj.transform_point(east_point[1], east_point[0], ccrs.PlateCarree())
+    west_proj = proj.transform_point(west_point[1], west_point[0], ccrs.PlateCarree())
+    
+    # Set the axis limits directly using projected coordinates
+    ax.set_xlim([west_proj[0], east_proj[0]])
+    ax.set_ylim([south_proj[1], north_proj[1]])
+
+    # Set up map features
     ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
     ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
-    #ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
 
     if title:
         ax.set_title(title)
@@ -2052,7 +2259,7 @@ def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmoce
     return ax
 
 
-def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, save_path, show_fig=True, figsave=False, dpi=100):
+def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, save_path, anomaly_type='absolute', show_fig=True, figsave=False, dpi=100):
     """
     Plot L2 granule outlines overlaid on a global chlorophyll-a anomaly map.
 
@@ -2073,6 +2280,8 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, sav
         is used to extract coordinate information.
     save_path : str
         Directory to save the output figure. Created if it does not exist.
+    anomaly_type : str, optional
+        Type of anomaly to plot ('absolute' or 'relative', default: 'absolute').
     show_fig : bool, optional
         If True, display the figure interactively (default: True).
     figsave : bool, optional
@@ -2086,7 +2295,7 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, sav
 
     Notes
     -----
-    - Chlorophyll-a anomaly is computed as: target_chl_a - window_chl_a.
+    - Chlorophyll-a anomaly is computed as: target_chl_a - window_chl_a for 'absolute' type, and as (target_chl_a - window_chl_a) / window_chl_a * 100 for 'relative' type.
     - Anomaly range is fixed at [-1, 1] mg/m³ for consistent visualization.
     - Granule outlines are traced clockwise (top → right → bottom → left).
     - Outlines crossing the dateline are split into segments for proper rendering on PlateCarree projection.
@@ -2116,8 +2325,13 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, sav
     print(f"Generating world map of identified L2 granules...")
 
     # Compute chlorophyll-a anomaly
-    chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
-    
+    if anomaly_type == 'relative':
+        chl_anomaly = (l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')) / l3_ds_window['chlor_a'].mean('time') * 100
+        vmin, vmax = -100, 100
+    elif anomaly_type == 'absolute':
+        chl_anomaly = l3_ds_target['chlor_a'].mean('time') - l3_ds_window['chlor_a'].mean('time')
+        vmin, vmax = -1, 1
+            
     # Extract date string from L3 dataset product name (format: YYYYMMDD)
     try:
         date_str = l3_ds_target.product_name.split('.')[1]
@@ -2142,8 +2356,8 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, sav
         extend="neither",
         robust=False,
         add_colorbar=False,
-        vmin=-1,
-        vmax=1,
+        vmin=vmin,
+        vmax=vmax,
         transform=ccrs.PlateCarree()
     )
 
@@ -2195,6 +2409,7 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, sav
         plt.show()
 
     plt.close(fig)
+
 
 def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, granule_bbox_pixel_counts, show_fig=True, figsave=False, dpi=100):
     """
@@ -2309,32 +2524,49 @@ def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, g
             max_lon = np.nanmax(lons)
             min_lat = np.nanmin(lats)
             max_lat = np.nanmax(lats)
-            
-            # Handle dateline crossing by converting to 0-360 range
-            if max_lon - min_lon > 180:
-                lon_360 = lons % 360
-                lon_ex_min = np.nanmin(lon_360)
-                lon_ex_max = np.nanmax(lon_360)
-            else:
-                lon_ex_min = min_lon
-                lon_ex_max = max_lon
 
-            # Compute map center for Orthographic projection
-            meanlon = float(np.nanmean(ds['longitude'].values))
-            meanlat = float(np.nanmean(ds['latitude'].values))
+            # Determine if granule crosses dateline
+            flag_crossdateline = (ds['longitude'].max() - ds['longitude'].min()) > 180
 
-            # ========== PLOT 1: ABSOLUTE SST ==========
+            # Find corner points of the granule using lat/lon arrays with dateline handling
+            if flag_crossdateline:
+                north_point = (lats[-1,-1], lons[-1,-1]%360)
+                south_point = (lats[0,0], lons[0,0]%360)
+                east_point = (lats[0,-1], lons[0,-1]%360)
+                west_point = (lats[-1,0], lons[-1,0]%360)
+            elif not flag_crossdateline:
+                north_point = (lats[-1,-1], lons[-1,-1])
+                south_point = (lats[0,0], lons[0,0])
+                east_point = (lats[0,-1], lons[0,-1])
+                west_point = (lats[-1,0], lons[-1,0])
+
+            # Compute central latitude and longitude for projection centering
+            central_lat = (north_point[0] + south_point[0]) / 2
+            central_lon = (east_point[1] + west_point[1]) / 2
+
+            # # ========== PLOT 1: ABSOLUTE SST ==========
             fig, ax = plt.subplots(
                 figsize=(10, 8),
-                subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
+                subplot_kw={'projection': ccrs.Orthographic(central_longitude=central_lon, central_latitude=central_lat)}
             )
+
+            proj = ccrs.Orthographic(central_longitude=central_lon, central_latitude=central_lat)
+
+            # Transform corner points to projected coordinates
+            north_proj = proj.transform_point(north_point[1], north_point[0], ccrs.PlateCarree())
+            south_proj = proj.transform_point(south_point[1], south_point[0], ccrs.PlateCarree())
+            east_proj = proj.transform_point(east_point[1], east_point[0], ccrs.PlateCarree())
+            west_proj = proj.transform_point(west_point[1], west_point[0], ccrs.PlateCarree())
+            
+            # Set the axis limits directly using projected coordinates
+            ax.set_xlim([west_proj[0], east_proj[0]])
+            ax.set_ylim([south_proj[1], north_proj[1]])
             
             # Add map context features
             ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=1)
             ax.add_feature(cfeature.OCEAN, facecolor='white')
             ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
             ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
-            ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
 
             # Draw granule outline (clockwise from top-left, around edges, back to start)
             edge_lon = np.concatenate([lons[0, :], lons[1:, -1], lons[-1, ::-1], lons[-2::-1, 0]])
@@ -2390,18 +2622,25 @@ def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, g
                 plt.show()
             plt.close()
 
-            # ========== PLOT 2: SST ANOMALY ==========
+
+            # # ========== PLOT 2: SST ANOMALY ==========
             fig, ax = plt.subplots(
                 figsize=(10, 8),
-                subplot_kw={'projection': ccrs.Orthographic(central_longitude=meanlon, central_latitude=meanlat)}
+                subplot_kw={'projection': ccrs.Orthographic(central_longitude=central_lon, central_latitude=central_lat)}
             )
+
+            proj = ccrs.Orthographic(central_longitude=central_lon, central_latitude=central_lat)
+            
+            # Set the axis limits directly using projected coordinates
+            ax.set_xlim([west_proj[0], east_proj[0]])
+            ax.set_ylim([south_proj[1], north_proj[1]])
             
             # Add map context features
             ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=1)
             ax.add_feature(cfeature.OCEAN, facecolor='white')
             ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=0.8)
             ax.gridlines(draw_labels={"left": "y", "bottom": "x"})
-            ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
+            #ax.set_extent([lon_ex_min, lon_ex_max, min_lat, max_lat], crs=ccrs.PlateCarree())
 
             # Draw granule outline (same as above)
             for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
@@ -2502,3 +2741,4 @@ def delete_downloaded_files(tspan, delete_flag=False):
         print(f"Cleaned up subdirectories in: {data_path}")
     else:
         print(f"Downloaded data retained at: {data_path}")
+
