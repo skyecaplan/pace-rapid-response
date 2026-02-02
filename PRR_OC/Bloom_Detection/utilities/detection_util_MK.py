@@ -329,33 +329,37 @@ def setup_data(tspan):
     -------
     >>> data_path, l2_path, l3_path, plot_path, html_path = setup_data(('2025-09-15', '2025-09-15'))
     """
+    # Get the base directory (Bloom_Detection folder) relative to this utility script
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    print(f"Base directory for data and outputs: {base_dir}")
+    
     date_str = tspan[0].replace('-', '')
-    data_path = f'./data/{date_str}'
+    data_path = os.path.join(base_dir, 'data', date_str)
     os.makedirs(data_path, exist_ok=True)
 
-    l2_path = f'./data/{date_str}/L2/'
+    l2_path = os.path.join(base_dir, 'data', date_str, 'L2')
     os.makedirs(l2_path, exist_ok=True)
 
-    l3_path = f'./data/{date_str}/L3/'
+    l3_path = os.path.join(base_dir, 'data', date_str, 'L3')
     os.makedirs(l3_path, exist_ok=True)
 
-    sst_path = f'./data/{date_str}/SST/'
+    sst_path = os.path.join(base_dir, 'data', date_str, 'SST')
     os.makedirs(sst_path, exist_ok=True)
 
-    plot_path = f'./figures/{date_str}/png/'
+    plot_path = os.path.join(base_dir, 'figures', date_str, 'png')
     os.makedirs(plot_path, exist_ok=True)
 
-    html_path = f'./figures/{date_str}/html/'
+    html_path = os.path.join(base_dir, 'figures', date_str, 'html')
     os.makedirs(html_path, exist_ok=True)
 
-    # Convert to absolute paths for printing
+    # Print absolute paths for confirmation
     print("The following directories have been created:")
-    print(f"{os.path.abspath(data_path)}\n"
-          f"{os.path.abspath(l2_path)}\n"
-          f"{os.path.abspath(l3_path)}\n"
-          f"{os.path.abspath(sst_path)}\n"
-          f"{os.path.abspath(plot_path)}\n"
-          f"{os.path.abspath(html_path)}")
+    print(f"{data_path}\n"
+          f"{l2_path}\n"
+          f"{l3_path}\n"
+          f"{sst_path}\n"
+          f"{plot_path}\n"
+          f"{html_path}")
 
     return data_path, l2_path, l3_path, sst_path, plot_path, html_path
 
@@ -2717,8 +2721,11 @@ def delete_downloaded_files(tspan, delete_flag=False):
     deleteflag : bool, optional
         If True, delete subdirectories after logging (default: True)
     """
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
     date_str = tspan[0].replace('-', '')
-    data_path = f'./data/{date_str}'
+    data_path = os.path.join(base_dir, 'data', date_str)
+    os.makedirs(data_path, exist_ok=True)
 
     # Discover all files in subdirectories
     l3_files_downloaded = []
