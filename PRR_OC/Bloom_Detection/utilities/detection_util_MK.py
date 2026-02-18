@@ -52,7 +52,7 @@ from scipy.ndimage import label  # Image processing (connected component labelin
 # --- Plotting and visualization ---
 import matplotlib.pyplot as plt            # Main plotting library
 import matplotlib.patches as patches       # Drawing shapes (e.g., rectangles)
-from matplotlib.colors import LogNorm, LinearSegmentedColormap  # Colormap helpers
+from matplotlib.colors import LogNorm, LinearSegmentedColormap, ListedColormap  # Colormap helpers
 from matplotlib import rcParams            # Matplotlib runtime configuration
 from mpl_toolkits.axes_grid1 import make_axes_locatable  # Advanced axes layout
 from PIL import Image, ImageEnhance         # Image processing (Pillow)
@@ -206,13 +206,13 @@ def Bloom_Detection(date_str, anomaly_type='absolute', anomaly_threshold=1, days
     
     # Generate L3 maps
     L3_data_plot_chl(l3_ds_target, l3_ds_window, l3_bboxes, plot_path,
-                      anomaly_type=anomaly_type, show_fig=False, figsave=True, dpi=dpi)
+                     anomaly_type=anomaly_type, show_fig=False, figsave=True, dpi=dpi)
 
     # ========== STAGE 3: L2 GRANULE DISCOVERY & FILTERING ==========
     print("\n[Stage 3] Discovering and filtering L2 granules...")
     
     # Search for L2 granules matching L3 bboxes
-    short_names = ['PACE_OCI_L2_SFREFL', 'PACE_OCI_L2_BGC', 'PACE_OCI_L2_AOP']
+    short_names = ['PACE_OCI_L2_SFREFL', 'PACE_OCI_L2_BGC', 'PACE_OCI_L2_AOP', 'PACE_OCI_L2_IOP']
     final_results = l2_granules_by_l3bbox(l3_bboxes, tspan, short_names=short_names, print_flag=False)
     print(f"Found {len(final_results)} matched L2 scenes across {len(short_names)} products")
 
@@ -251,7 +251,8 @@ def Bloom_Detection(date_str, anomaly_type='absolute', anomaly_threshold=1, days
     print("  • Generating BGC product overlays...")
     plot_save_BGC_l2_overlay(
         l2_data_paths_filt, plot_path, 'chlor_a', l3_bboxes, granule_bbox_pixel_counts,
-        cmap=cmocean.cm.algae, vmin=0.1, vmax=30, show_fig=False, figsave=True, dpi=dpi
+        cmap=ListedColormap(plt.get_cmap('gist_earth')(np.linspace(0, 0.7, 256))), vmin=0.1,
+          vmax=30, show_fig=False, figsave=True, dpi=dpi
     )
     plot_save_BGC_l2_overlay(
         l2_data_paths_filt, plot_path, 'poc', l3_bboxes, granule_bbox_pixel_counts,
@@ -271,6 +272,37 @@ def Bloom_Detection(date_str, anomaly_type='absolute', anomaly_threshold=1, days
     plot_save_AOP_l2_overlay(
         l2_data_paths_filt, plot_path, 'nflh', l3_bboxes, granule_bbox_pixel_counts,
         cmap=cmocean.cm.thermal, vmin=0, vmax=1, log_scale=False, show_fig=False, figsave=True, dpi=dpi
+    )
+
+    # IOP product overlays
+    print("  • Generating IOP product overlays...")
+    plot_save_IOP_l2_overlay(
+        l2_data_paths_filt, plot_path, 'a', l3_bboxes, granule_bbox_pixel_counts,
+        wl=442, vmin=.01, vmax=1, cmap='inferno', show_fig=False, figsave=True, dpi=dpi
+    )
+    plot_save_IOP_l2_overlay(
+        l2_data_paths_filt, plot_path, 'anw', l3_bboxes, granule_bbox_pixel_counts,
+        wl=442, vmin=.01, vmax=1, cmap='inferno', show_fig=False, figsave=True, dpi=dpi
+    )
+    plot_save_IOP_l2_overlay(
+        l2_data_paths_filt, plot_path, 'aph', l3_bboxes, granule_bbox_pixel_counts,
+        wl=442, vmin=.01, vmax=1, cmap='inferno', show_fig=False, figsave=True, dpi=dpi
+    )
+    plot_save_IOP_l2_overlay(
+        l2_data_paths_filt, plot_path, 'adg', l3_bboxes, granule_bbox_pixel_counts,
+        wl=442, vmin=.01, vmax=1, cmap='inferno', show_fig=False, figsave=True, dpi=dpi
+    )
+    plot_save_IOP_l2_overlay(
+        l2_data_paths_filt, plot_path, 'bb', l3_bboxes, granule_bbox_pixel_counts,
+        wl=442, vmin=.001, cmap='jet', show_fig=False, figsave=True, dpi=dpi
+    )
+    plot_save_IOP_l2_overlay(
+        l2_data_paths_filt, plot_path, 'bbp', l3_bboxes, granule_bbox_pixel_counts,
+        wl=442, vmin=.001, cmap='jet', show_fig=False, figsave=True, dpi=dpi
+    )
+    plot_save_IOP_l2_overlay(
+        l2_data_paths_filt, plot_path, 'Kd', l3_bboxes, granule_bbox_pixel_counts,
+        wl=490, cmap='jet', show_fig=False, figsave=True, dpi=dpi
     )
 
     # SST and SST anomaly overlays
@@ -1397,6 +1429,71 @@ def plot_save_AOP_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, gran
                 plt.show()
         plt.close()
 
+def plot_save_IOP_l2_overlay(l2_data_paths, save_path, var_name, l3_bboxes, granule_bbox_pixel_counts, wl=None, vmin=None, vmax=None, cmap=cmocean.cm.haline, log_scale=True, show_fig=True, figsave=False, dpi=100):
+    """
+    Plot and optionally save overlays of IOP L2 granules with bounding boxes.
+
+    Parameters
+    ----------
+    l2_data_paths : list
+        List of tuples, each containing file paths for a granule (e.g., (SFREFL_path, BGC_path)).
+    save_path : str
+        Directory to save figures.
+    var_name : str
+        Variable name to plot from BGC file.
+    l3_bboxes : list
+        List of bounding boxes for overlay.
+    granule_bbox_pixel_counts : dict
+        Mapping of path to bbox pixel counts.
+    wl : float or None
+        Wavelength to select for plotting (for AOP/IOP variables). If None, use default.
+    vmin, vmax, cmap, log_scale : plotting options
+    show_fig : bool
+        If True, display the figure.
+    figsave : bool
+        If True, save the figure to disk.
+    dpi : int
+        Resolution of saved figure.
+
+    Returns
+    -------
+    None
+    """
+    # Status of AOP plotting
+    print(f"Generating {len(l2_data_paths)} {var_name} plots of identified L2 granules...")
+
+    for i, path in enumerate(l2_data_paths):
+        try:
+            sref_idx = [j for j, p in enumerate(path) if 'SFREFL' in str(p)][0]
+            iop_idx = [j for j, p in enumerate(path) if 'IOP' in str(p)][0]
+        except IndexError:
+            print(f"Could not find SFREFL or IOP in path tuple: {path}")
+            continue
+
+        fig, ax = plot_setup(map_props(path[sref_idx]))
+        plot_rgb_from_path(path[sref_idx], ax)
+        # if var_name == 'avw':
+        #     cmap = generate_colormap(min_wavelength=400, max_wavelength=700, num_colors=256)
+        plot_var_from_path(path[iop_idx], var_name, ax, wl=wl, vmin=vmin, vmax=vmax, cmap=cmap, log_scale=log_scale)
+        add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
+        
+        if figsave:
+            # Extract date_time from filename, fallback to index if not found
+            basename = os.path.basename(path[0])
+            parts = basename.split('.')
+            date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
+            out_dir = os.path.join(save_path, date_time)
+            os.makedirs(out_dir, exist_ok=True)
+            fname = f"{date_time}_{var_name}_overlay.png"
+            plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
+            print(f"Figure saved to: {os.path.join(out_dir, fname)}")
+            if show_fig:
+                plt.show()
+        else:
+            if show_fig:
+                plt.show()
+        plt.close()
+
 
 def plot_setup(props):
     """
@@ -1521,24 +1618,32 @@ def map_props(path):
     lonrange = float(np.nanmax(lons) - np.nanmin(lons))
     latrange = float(np.nanmax(lats) - np.nanmin(lats))
 
-    # Find corner points of the granule using lat/lon arrays with dateline handling
+    # Set corners with dateline handling.
     if flag_crossdateline:
-        north_point = (lats[-1,-1], lons[-1,-1]%360)
-        south_point = (lats[0,0], lons[0,0]%360)
-        east_point = (lats[0,-1], lons[0,-1]%360)
-        west_point = (lats[-1,0], lons[-1,0]%360)
-    elif not flag_crossdateline:
-        north_point = (lats[-1,-1], lons[-1,-1])
-        south_point = (lats[0,0], lons[0,0])
-        east_point = (lats[0,-1], lons[0,-1])
-        west_point = (lats[-1,0], lons[-1,0])
+        corners = [(lats[-1,-1], lons[-1,-1]%360), (lats[0,0], lons[0,0]%360), (lats[0,-1], lons[0,-1]%360), (lats[-1,0], lons[-1,0]%360)]
+    else:
+        corners = [(lats[-1,-1], lons[-1,-1]), (lats[0,0], lons[0,0]), (lats[0,-1], lons[0,-1]), (lats[-1,0], lons[-1,0])]
+
+    # Sort corners by longitude to find east/west points as it is possible for the north/south points to have more extreme longitudes than the east/west points in cases where the granule is oriented diagonally, and this method ensures correct identification of east/west points regardless of granule orientation
+    corner_lons = [corner[1] for corner in corners]
+    sorted_lon_idxs = np.argsort(corner_lons)
+
+    north_idx = np.argmax([corner[0] for corner in corners])
+    south_idx = np.argmin([corner[0] for corner in corners])
+    east_idx = next(idx for idx in sorted_lon_idxs[::-1] if idx not in [north_idx, south_idx])
+    west_idx = next(idx for idx in sorted_lon_idxs if idx not in [north_idx, south_idx])
+    
+    north_point = corners[north_idx]
+    south_point = corners[south_idx]
+    east_point = corners[east_idx]
+    west_point = corners[west_idx]
 
     # Compute central latitude and longitude for projection centering
     clon = (north_point[1] + south_point[1]) / 2
     clat = (east_point[0] + west_point[0]) / 2
 
     proj = ccrs.Orthographic(central_longitude=clon, central_latitude=clat)
-
+    
     # Transform corner points to projected coordinates
     north_proj = proj.transform_point(north_point[1], north_point[0], ccrs.PlateCarree())
     south_proj = proj.transform_point(south_point[1], south_point[0], ccrs.PlateCarree())
@@ -1682,7 +1787,7 @@ def enhance(rgb, scale = 0.01, vmin = 0.01, vmax = 1.04, gamma=0.95, contrast=1.
     return rgb
 
 
-def plot_var_from_path(path, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vmax=None, log_scale=True, output_path=None, dpi=100):
+def plot_var_from_path(path, var_str, ax, wl=None, cmap=cmocean.cm.haline, vmin=None, vmax=None, log_scale=True, output_path=None, dpi=100):
     """
     Plot a variable from an xarray.Dataset on a Cartopy axis with colorbar.
 
@@ -1697,6 +1802,8 @@ def plot_var_from_path(path, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vma
         Name of the variable to plot.
     ax : matplotlib.axes.Axes
         Cartopy axis on which to plot the data.
+    wl : float or None
+        Wavelength to select for plotting (for AOP/IOP variables). If None, use default.
     cmap : matplotlib.colors.Colormap, optional
         Colormap to use for the plot (default: cmocean.cm.haline).
     vmin : float, optional
@@ -1728,11 +1835,62 @@ def plot_var_from_path(path, var_str, ax, cmap=cmocean.cm.haline, vmin=None, vma
     ds = xr.merge(dt.to_dict().values())  # Merge all datasets in the DataTree into a single xarray Dataset
     ds = ds.set_coords(("longitude", "latitude"))  # Set longitude and latitude as coordinates
 
+    # Handle special case for non-water absorption coefficient at wavelength (anw)
+    if var_str=='anw':
+        var_str = 'a'
+        anw_flag = True
+    else:
+        anw_flag = False
+
+    # Handle special case for non-algal particulate and colored dissolved organic matter absorption coefficient at wavelength (adg)
+    if var_str=='adg':
+        var_str = 'a'
+        adg_flag = True
+    else:
+        adg_flag = False
+
+    # Handle special case for particulate backscattering coefficient at wavelength (bbp)
+    if var_str=='bbp':
+        var_str = 'bb'
+        bbp_flag = True
+    else:
+        bbp_flag = False
+
     data = ds[var_str]
-    data = data.where(data > 0)  # Mask out non-positive values for log scale
     lon = ds['longitude']
     lat = ds['latitude']
 
+    # Select data variable indicated wavelength if wl keyword argurment is provided (for AOP/IOP variables)
+    if wl is not None:
+        data = data.sel(wavelength_3d=wl)
+        data.name = f"{data.name} ({wl})"
+
+    # Calculate anw from a if anw_flag is True
+    if anw_flag:
+        aw_idx = (ds['wavelength'] == wl).argmax().item()
+        aw_wl = ds['aw'].isel(number_of_reflective_bands=aw_idx)
+        data = (data - aw_wl).assign_attrs(data.attrs)  # Compute anw and preserve attributes
+        data.name = f"anw ({wl})"
+        
+    # Calculate adg from a if adg_flag is True
+    if adg_flag:
+        aw_idx = (ds['wavelength'] == wl).argmax().item()
+        aw_wl = ds['aw'].isel(number_of_reflective_bands=aw_idx)
+        data = (data - aw_wl).assign_attrs(data.attrs)  # Compute anw and preserve attributes
+        data = data - ds['aph'].sel(wavelength_3d=wl)  # Subtract aph from anw to get adg
+        data.name = f"adg ({wl})"
+
+    # Calculate bbp from bb if bbp_flag is True
+    if bbp_flag:
+        bbw_idx = (ds['wavelength'] == wl).argmax().item()
+        bbw_wl = ds['bbw'].isel(number_of_reflective_bands=bbw_idx)
+        data = (data - bbw_wl).assign_attrs(data.attrs)  # Compute bbp and preserve attributes
+        data.name = f"bbp ({wl})"
+
+    # Mask out non-positive values for log scale
+    data = data.where(data > 0)
+        
+    
     if vmin is None:
         vmin = np.nanmin(data.values)
 
@@ -1944,17 +2102,25 @@ def plot_granule_outline(l2_data_paths, save_path, show_fig=True, figsave=False,
         # Determine if granule crosses dateline
         flag_crossdateline = (ds['longitude'].max() - ds['longitude'].min()) > 180
 
-        # Find corner points of the granule using lat/lon arrays with dateline handling
+        # Set corners with dateline handling.
         if flag_crossdateline:
-            north_point = (lats[-1,-1], lons[-1,-1]%360)
-            south_point = (lats[0,0], lons[0,0]%360)
-            east_point = (lats[0,-1], lons[0,-1]%360)
-            west_point = (lats[-1,0], lons[-1,0]%360)
-        elif not flag_crossdateline:
-            north_point = (lats[-1,-1], lons[-1,-1])
-            south_point = (lats[0,0], lons[0,0])
-            east_point = (lats[0,-1], lons[0,-1])
-            west_point = (lats[-1,0], lons[-1,0])
+            corners = [(lats[-1,-1], lons[-1,-1]%360), (lats[0,0], lons[0,0]%360), (lats[0,-1], lons[0,-1]%360), (lats[-1,0], lons[-1,0]%360)]
+        else:
+            corners = [(lats[-1,-1], lons[-1,-1]), (lats[0,0], lons[0,0]), (lats[0,-1], lons[0,-1]), (lats[-1,0], lons[-1,0])]
+
+        # Sort corners by longitude to find east/west points as it is possible for the north/south points to have more extreme longitudes than the east/west points in cases where the granule is oriented diagonally, and this method ensures correct identification of east/west points regardless of granule orientation
+        corner_lons = [corner[1] for corner in corners]
+        sorted_lon_idxs = np.argsort(corner_lons)
+
+        north_idx = np.argmax([corner[0] for corner in corners])
+        south_idx = np.argmin([corner[0] for corner in corners])
+        east_idx = next(idx for idx in sorted_lon_idxs[::-1] if idx not in [north_idx, south_idx])
+        west_idx = next(idx for idx in sorted_lon_idxs if idx not in [north_idx, south_idx])
+        
+        north_point = corners[north_idx]
+        south_point = corners[south_idx]
+        east_point = corners[east_idx]
+        west_point = corners[west_idx]
 
         # Compute central latitude and longitude for projection centering
         clat = (north_point[0] + south_point[0]) / 2
@@ -2125,10 +2291,7 @@ def plot_L3_anomaly_on_L2_granules(l3_ds_target, l3_ds_window, l3_bboxes, granul
             date_time = parts[1] if len(parts) > 1 else f"granule_{i}"
             out_dir = os.path.join(savepath, date_time)
             os.makedirs(out_dir, exist_ok=True)
-            if anomaly_type == 'relative':
-                fname =  f'{date_time}_L3_Chl_Relative_Anomaly_L2gran_bboxes.png'
-            else:
-                fname =  f'{date_time}_L3_Chl_Absolute_Anomaly_L2gran_bboxes.png'
+            fname =  f'{date_time}_L3_Chl_Anomaly_L2gran_bboxes.png'
             plt.savefig(os.path.join(out_dir, fname), dpi=dpi, bbox_inches='tight')
             print(f"Figure saved to: {os.path.join(out_dir, fname)}")
             if show_fig:
@@ -2185,17 +2348,25 @@ def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmoce
     # Determine if granule crosses dateline
     flag_crossdateline = (l2_dataset['longitude'].max() - l2_dataset['longitude'].min()) > 180
 
-    # Find corner points of the granule using lat/lon arrays with dateline handling
+    # Set corners with dateline handling.
     if flag_crossdateline:
-        north_point = (lats[-1,-1], lons[-1,-1]%360)
-        south_point = (lats[0,0], lons[0,0]%360)
-        east_point = (lats[0,-1], lons[0,-1]%360)
-        west_point = (lats[-1,0], lons[-1,0]%360)
-    elif not flag_crossdateline:
-        north_point = (lats[-1,-1], lons[-1,-1])
-        south_point = (lats[0,0], lons[0,0])
-        east_point = (lats[0,-1], lons[0,-1])
-        west_point = (lats[-1,0], lons[-1,0])
+        corners = [(lats[-1,-1], lons[-1,-1]%360), (lats[0,0], lons[0,0]%360), (lats[0,-1], lons[0,-1]%360), (lats[-1,0], lons[-1,0]%360)]
+    else:
+        corners = [(lats[-1,-1], lons[-1,-1]), (lats[0,0], lons[0,0]), (lats[0,-1], lons[0,-1]), (lats[-1,0], lons[-1,0])]
+
+    # Sort corners by longitude to find east/west points as it is possible for the north/south points to have more extreme longitudes than the east/west points in cases where the granule is oriented diagonally, and this method ensures correct identification of east/west points regardless of granule orientation
+    corner_lons = [corner[1] for corner in corners]
+    sorted_lon_idxs = np.argsort(corner_lons)
+
+    north_idx = np.argmax([corner[0] for corner in corners])
+    south_idx = np.argmin([corner[0] for corner in corners])
+    east_idx = next(idx for idx in sorted_lon_idxs[::-1] if idx not in [north_idx, south_idx])
+    west_idx = next(idx for idx in sorted_lon_idxs if idx not in [north_idx, south_idx])
+    
+    north_point = corners[north_idx]
+    south_point = corners[south_idx]
+    east_point = corners[east_idx]
+    west_point = corners[west_idx]
 
     # Compute central latitude and longitude for projection centering
     clat = (north_point[0] + south_point[0]) / 2
@@ -2250,7 +2421,9 @@ def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmoce
     )
 
     # Add colorbar
-    cbar = plt.colorbar(plot, ax=ax, orientation='horizontal', pad=0.05)
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("bottom", size="2.5%", pad=0.5, axes_class=plt.Axes)
+    cbar = plt.colorbar(plot, cax=cax, orientation='horizontal')
     if clabel:
         cbar.set_label(clabel)
 
@@ -2267,6 +2440,7 @@ def plot_L3_anomaly_per_L2_granule(dataarray, l2_dataset, title=None, cmap=cmoce
     edge_lat_plot = np.split(edge_lat, split_idx) if split_idx.size > 0 else [edge_lat]
     for seg_lon, seg_lat in zip(edge_lon_plot, edge_lat_plot):
         ax.plot(seg_lon, seg_lat, color='green', linewidth=2, transform=ccrs.PlateCarree())
+
 
     # Save if requested
     if output_path:
@@ -2364,7 +2538,7 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, sav
     ax.set_extent([-180, 180, -90, 90], crs=ccrs.PlateCarree())
 
     # ========== PLOT BACKGROUND: CHL-A ANOMALY ==========
-    chl_anomaly.plot(
+    mesh = chl_anomaly.plot(
         x="lon",
         y="lat",
         ax=ax,
@@ -2376,6 +2550,11 @@ def plot_L2_granule_outlines(l3_ds_target, l3_ds_window, l2_data_paths_filt, sav
         vmax=vmax,
         transform=ccrs.PlateCarree()
     )
+
+    # Add colorbar
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("bottom", size="2.5%", pad=0.5, axes_class=plt.Axes)
+    cbar = plt.colorbar(mesh, cax=cax, orientation='horizontal')
 
     # ========== OVERLAY L2 GRANULE OUTLINES ==========
     for i, path in enumerate(l2_data_paths_filt):
@@ -2544,17 +2723,25 @@ def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, g
             # Determine if granule crosses dateline
             flag_crossdateline = (ds['longitude'].max() - ds['longitude'].min()) > 180
 
-            # Find corner points of the granule using lat/lon arrays with dateline handling
+            # Set corners with dateline handling.
             if flag_crossdateline:
-                north_point = (lats[-1,-1], lons[-1,-1]%360)
-                south_point = (lats[0,0], lons[0,0]%360)
-                east_point = (lats[0,-1], lons[0,-1]%360)
-                west_point = (lats[-1,0], lons[-1,0]%360)
-            elif not flag_crossdateline:
-                north_point = (lats[-1,-1], lons[-1,-1])
-                south_point = (lats[0,0], lons[0,0])
-                east_point = (lats[0,-1], lons[0,-1])
-                west_point = (lats[-1,0], lons[-1,0])
+                corners = [(lats[-1,-1], lons[-1,-1]%360), (lats[0,0], lons[0,0]%360), (lats[0,-1], lons[0,-1]%360), (lats[-1,0], lons[-1,0]%360)]
+            else:
+                corners = [(lats[-1,-1], lons[-1,-1]), (lats[0,0], lons[0,0]), (lats[0,-1], lons[0,-1]), (lats[-1,0], lons[-1,0])]
+
+            # Sort corners by longitude to find east/west points as it is possible for the north/south points to have more extreme longitudes than the east/west points in cases where the granule is oriented diagonally, and this method ensures correct identification of east/west points regardless of granule orientation
+            corner_lons = [corner[1] for corner in corners]
+            sorted_lon_idxs = np.argsort(corner_lons)
+
+            north_idx = np.argmax([corner[0] for corner in corners])
+            south_idx = np.argmin([corner[0] for corner in corners])
+            east_idx = next(idx for idx in sorted_lon_idxs[::-1] if idx not in [north_idx, south_idx])
+            west_idx = next(idx for idx in sorted_lon_idxs if idx not in [north_idx, south_idx])
+            
+            north_point = corners[north_idx]
+            south_point = corners[south_idx]
+            east_point = corners[east_idx]
+            west_point = corners[west_idx]
 
             # Compute central latitude and longitude for projection centering
             central_lat = (north_point[0] + south_point[0]) / 2
@@ -2617,8 +2804,10 @@ def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, g
             )
 
             # Add colorbar
-            cbar_sst = plt.colorbar(plot_sst, ax=ax, orientation='horizontal', pad=0.05)
-            cbar_sst.set_label('SST [°C]')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("bottom", size="2.5%", pad=0.5, axes_class=plt.Axes)
+            cbar = plt.colorbar(plot_sst, cax=cax, orientation='horizontal')
+            cbar.set_label('SST [°C]')
 
             # Overlay L3 bounding boxes
             add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
@@ -2680,8 +2869,10 @@ def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, g
             )
 
             # Add colorbar
-            cbar_anom = plt.colorbar(plot_anom, ax=ax, orientation='horizontal', pad=0.05)
-            cbar_anom.set_label('SST Anomaly [°C]')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("bottom", size="2.5%", pad=0.5, axes_class=plt.Axes)
+            cbar = plt.colorbar(plot_anom, cax=cax, orientation='horizontal')
+            cbar.set_label('SST Anomaly [°C]')
 
             # Overlay L3 bounding boxes
             add_bboxes_to_plot(ax, path, l3_bboxes, granule_bbox_pixel_counts)
@@ -2703,7 +2894,7 @@ def plot_save_SST_overlay(l2_data_paths, datapath, savepath, tspan, l3_bboxes, g
 
     except Exception as e:
         print(f"GHRSST download/open failed ({type(e).__name__}): {e}. SST plots skipped.")
-        return   
+        return
 
 
 def delete_downloaded_files(tspan, delete_flag=False):
@@ -2714,7 +2905,7 @@ def delete_downloaded_files(tspan, delete_flag=False):
     ----------
     tspan : tuple of str
         Time span tuple, e.g., ('2025-10-30', '2025-10-30')
-    deleteflag : bool, optional
+    delete_flag : bool, optional
         If True, delete subdirectories after logging (default: True)
     """
     date_str = tspan[0].replace('-', '')
@@ -2757,4 +2948,3 @@ def delete_downloaded_files(tspan, delete_flag=False):
         print(f"Cleaned up subdirectories in: {data_path}")
     else:
         print(f"Downloaded data retained at: {data_path}")
-
