@@ -18,7 +18,7 @@ from detection_util_MK import Bloom_Detection
 from gt_html_utils_MK import write_full_html
 
 # %% Single Configuration Single Day Run Example
-day = '20260202'
+day = '20260103'
 days = 15
 anomaly_type = 'relative'
 anomaly_threshold = 100
@@ -26,7 +26,7 @@ base_dir = os.path.dirname(__file__)
 out_path = os.path.join(base_dir, 'figures', day, 'html', f'OCI_chlor_a_anomaly_daily_{day}.html')
 move_path = os.path.join(base_dir, 'figures', day)
 
-Bloom_Detection(day, anomaly_type=anomaly_type, anomaly_threshold=anomaly_threshold, days_prior=days, dpi=200, delete_flag=False)
+#Bloom_Detection(day, anomaly_type=anomaly_type, anomaly_threshold=anomaly_threshold, days_prior=days, dpi=200, delete_flag=False)
 write_full_html(day, out_path)
 
 
